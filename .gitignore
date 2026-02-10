@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.env
+.venv/
+venv/
+
+# PyTorch
+*.pt
+*.pth
+
+# Logs y runs
+runs/
+checkpoints/
+
+# TensorBoard
+events.out.tfevents.*
+
+# Experimentos / outputs temporales
+*.log
+*.tmp
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# IDEs
+.vscode/
+.idea/

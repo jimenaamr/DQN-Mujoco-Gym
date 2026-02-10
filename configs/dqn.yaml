@@ -1,0 +1,47 @@
+seed: 0
+device: "cuda"   # "cpu" si no tienes
+
+env:
+  domain: "walker"     # dm_control domain (e.g., walker, hopper, cheetah, humanoid)
+  task: "walk"         # dm_control task (e.g., walk, stand, run)
+  pixels:
+    height: 84
+    width: 84
+    camera_id: 0
+  frame_stack: 4
+  action_repeat: 2
+  time_limit: 1000
+
+  # Acciones discretas (prototipos) -> lista de vectores en [-1,1] del tamaño de action_dim (continuous)
+  # Ajusta esto según el entorno (action_dim lo puedes imprimir con env.action_space.shape)
+  action_prototypes:
+    - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # noop
+    - [ 0.5,  0.5,  0.5,  0.5,  0.5,  0.5]   # forward-ish
+    - [-0.5, -0.5, -0.5, -0.5, -0.5, -0.5]   # backward-ish
+    - [ 1.0,  0.0,  1.0,  0.0,  1.0,  0.0]   # alternating
+    - [ 0.0,  1.0,  0.0,  1.0,  0.0,  1.0]   # alternating 2
+
+train:
+  total_steps: 800000
+  learning_starts: 20000
+  train_freq: 4
+  batch_size: 32
+  buffer_size: 200000
+  gamma: 0.99
+  lr: 1.0e-4
+  target_update_freq: 8000
+  grad_clip_norm: 10.0
+
+exploration:
+  eps_start: 1.0
+  eps_end: 0.05
+  eps_decay_steps: 300000
+
+eval:
+  every_steps: 20000
+  episodes: 5
+
+logging:
+  run_dir: "runs"
+  ckpt_dir: "checkpoints"
+  log_every: 1000

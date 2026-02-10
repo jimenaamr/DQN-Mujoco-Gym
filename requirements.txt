@@ -1,0 +1,9 @@
+numpy
+torch
+gymnasium
+dm_control
+dm_control2gymnasium
+opencv-python
+tensorboard
+pyyaml
+tqdm
