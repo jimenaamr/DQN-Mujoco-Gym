@@ -18,13 +18,8 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
     seed = int(cfg["seed"])
 
     e = cfg["env"]
-    p = e["pixels"]
     env_spec = EnvSpec(
-        domain=e["domain"],
-        task=e["task"],
-        height=p["height"],
-        width=p["width"],
-        camera_id=p["camera_id"],
+        env_id=e["env_id"],
         frame_stack=int(e["frame_stack"]),
         action_repeat=int(e["action_repeat"]),
         time_limit=int(e["time_limit"]),

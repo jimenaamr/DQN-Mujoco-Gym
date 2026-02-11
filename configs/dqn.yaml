@@ -2,16 +2,10 @@ seed: 0
 device: "cuda"   # "cpu" si no tienes
 
 env:
-  domain: "walker"     # dm_control domain (e.g., walker, hopper, cheetah, humanoid)
-  task: "walk"         # dm_control task (e.g., walk, stand, run)
-  pixels:
-    height: 84
-    width: 84
-    camera_id: 0
+  env_id: "Walker2d-v4"
   frame_stack: 4
-  action_repeat: 2
+  action_repeat: 1
   time_limit: 1000
-
   # Acciones discretas (prototipos) -> lista de vectores en [-1,1] del tamaño de action_dim (continuous)
   # Ajusta esto según el entorno (action_dim lo puedes imprimir con env.action_space.shape)
   action_prototypes:

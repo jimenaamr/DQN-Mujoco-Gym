@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import time
-from dataclasses import dataclass
 from typing import Any, Dict
 
 import yaml
@@ -22,13 +21,8 @@ def load_yaml(path: str) -> Dict[str, Any]:
 
 def to_env_spec(cfg: Dict[str, Any]) -> EnvSpec:
     e = cfg["env"]
-    p = e["pixels"]
     return EnvSpec(
-        domain=e["domain"],
-        task=e["task"],
-        height=p["height"],
-        width=p["width"],
-        camera_id=p["camera_id"],
+        env_id=e["env_id"],
         frame_stack=int(e["frame_stack"]),
         action_repeat=int(e["action_repeat"]),
         time_limit=int(e["time_limit"]),
@@ -79,7 +73,7 @@ def main(config_path: str) -> None:
     train_env = make_env(env_spec, seed=seed)
     eval_env = make_env(env_spec, seed=seed + 123)
 
-    obs_shape = train_env.observation_space.shape  # (C,H,W)
+    obs_shape = train_env.observation_space.shape  # vector (n,) or stacked (k*n,)
     n_actions = train_env.action_space.n
 
     dqn_cfg = to_dqn_cfg(cfg)
@@ -90,10 +84,11 @@ def main(config_path: str) -> None:
     os.makedirs(run_dir, exist_ok=True)
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    run_name = f"{env_spec.domain}-{env_spec.task}_seed{seed}_{int(time.time())}"
+    run_name = f"{env_spec.env_id}_seed{seed}_{int(time.time())}"
     writer = SummaryWriter(log_dir=os.path.join(run_dir, run_name))
 
-    # Save resolved config alongside logs
+    # Save resolved config
+    os.makedirs(os.path.join(run_dir, run_name), exist_ok=True)
     with open(os.path.join(run_dir, run_name, "config.yaml"), "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f)
 
@@ -111,7 +106,7 @@ def main(config_path: str) -> None:
         agent.global_step = step
 
         a = agent.act(obs, eval_mode=False)
-        next_obs, r, terminated, truncated, info = train_env.step(a)
+        next_obs, r, terminated, truncated, _ = train_env.step(a)
         done = bool(terminated or truncated)
 
         agent.store(obs, a, float(r), next_obs, done)

@@ -1,8 +1,6 @@
 numpy
 torch
-gymnasium
-dm_control
-dm_control2gymnasium
+gymnasium[mujoco]
 opencv-python
 tensorboard
 pyyaml
