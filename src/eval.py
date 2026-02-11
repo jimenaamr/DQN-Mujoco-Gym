@@ -4,7 +4,7 @@ import argparse
 import yaml
 import numpy as np
 
-from env import EnvSpec, make_env
+from src.env import EnvSpec, make_env
 from dqn import DQNAgent, DQNConfig
 
 

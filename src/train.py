@@ -10,7 +10,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
-from env import EnvSpec, make_env
+from src.env import EnvSpec, make_env
 from dqn import DQNAgent, DQNConfig
 
 
