@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
 from src.env import EnvSpec, make_env
-from dqn import DQNAgent, DQNConfig
+from src.dqn import DQNAgent, DQNConfig
 
 
 def load_yaml(path: str) -> Dict[str, Any]:

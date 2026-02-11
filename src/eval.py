@@ -5,7 +5,7 @@ import yaml
 import numpy as np
 
 from src.env import EnvSpec, make_env
-from dqn import DQNAgent, DQNConfig
+from src.dqn import DQNAgent, DQNConfig
 
 
 def load_yaml(path: str):
