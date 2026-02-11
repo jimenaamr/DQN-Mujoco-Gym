@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List
+import cv2
 
 import numpy as np
 import gymnasium as gym
@@ -17,56 +18,50 @@ class EnvSpec:
     action_prototypes: List[List[float]]
 
 
-class DiscreteActionWrapper(gym.ActionWrapper):
-    """Map discrete action index -> continuous action prototype."""
-    def __init__(self, env: gym.Env, prototypes: np.ndarray):
+class PixelObservationWrapper(gym.Wrapper):
+    """
+    Replace vector observation with rendered RGB image.
+    """
+    def __init__(self, env: gym.Env, height=84, width=84):
         super().__init__(env)
-        assert prototypes.ndim == 2
-        self.prototypes = prototypes.astype(np.float32)
-        self.action_space = spaces.Discrete(self.prototypes.shape[0])
+        self.height = height
+        self.width = width
 
-    def action(self, act: int):
-        return self.prototypes[int(act)]
+        self.observation_space = spaces.Box(
+            low=0,
+            high=255,
+            shape=(3, height, width),
+            dtype=np.uint8,
+        )
 
+    def _get_obs(self):
+        frame = self.env.render()  # (H, W, 3)
+        frame = cv2.resize(frame, (self.width, self.height), interpolation=cv2.INTER_AREA)  # (h,w,3)
+        frame = np.transpose(frame, (2, 0, 1))  # (3, h, w)
+        return frame.astype(np.uint8)
 
-class ActionRepeat(gym.Wrapper):
-    """Repeat the same action K times and accumulate reward."""
-    def __init__(self, env: gym.Env, repeat: int):
-        super().__init__(env)
-        assert repeat >= 1
-        self.repeat = int(repeat)
+    def reset(self, **kwargs):
+        self.env.reset(**kwargs)
+        return self._get_obs(), {}
 
     def step(self, action):
-        total_reward = 0.0
-        terminated = False
-        truncated = False
-        info = {}
-
-        for _ in range(self.repeat):
-            obs, reward, terminated, truncated, info = self.env.step(action)
-            total_reward += float(reward)
-            if terminated or truncated:
-                break
-
-        return obs, total_reward, terminated, truncated, info
+        _, reward, terminated, truncated, info = self.env.step(action)
+        return self._get_obs(), reward, terminated, truncated, info
 
 
 class FrameStack(gym.Wrapper):
-    """Stack last K observations along the last axis (Gymnasium style)."""
     def __init__(self, env: gym.Env, k: int):
         super().__init__(env)
-        assert k >= 1
-        self.k = int(k)
+        self.k = k
         self.frames = None
 
-        obs_space = env.observation_space
-        assert isinstance(obs_space, spaces.Box)
-        assert len(obs_space.shape) == 1  # classic mujoco obs is vector
-        n = obs_space.shape[0]
-
-        low = np.repeat(obs_space.low, self.k, axis=0)
-        high = np.repeat(obs_space.high, self.k, axis=0)
-        self.observation_space = spaces.Box(low=low, high=high, dtype=obs_space.dtype)
+        c, h, w = env.observation_space.shape
+        self.observation_space = spaces.Box(
+            low=0,
+            high=255,
+            shape=(c * k, h, w),
+            dtype=np.uint8,
+        )
 
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
@@ -80,36 +75,38 @@ class FrameStack(gym.Wrapper):
         return self._get_obs(), reward, terminated, truncated, info
 
     def _get_obs(self):
-        assert self.frames is not None
         return np.concatenate(self.frames, axis=0)
 
 
-def make_env(spec: EnvSpec, seed: int) -> gym.Env:
-    env = gym.make(spec.env_id)
+class DiscreteActionWrapper(gym.ActionWrapper):
+    def __init__(self, env: gym.Env, prototypes: np.ndarray):
+        super().__init__(env)
+        self.prototypes = prototypes.astype(np.float32)
+        self.action_space = spaces.Discrete(len(prototypes))
 
-    # Seed
+    def action(self, act):
+        return self.prototypes[act]
+
+
+def make_env(spec: EnvSpec, seed: int):
+    env = gym.make(spec.env_id, render_mode="rgb_array")
     env.reset(seed=seed)
 
-    # Time limit (override if needed)
-    if spec.time_limit is not None:
-        env = gym.wrappers.TimeLimit(env, max_episode_steps=int(spec.time_limit))
+    # Convert to pixel observation
+    env = PixelObservationWrapper(env)
 
-    # Action repeat
-    if spec.action_repeat and int(spec.action_repeat) > 1:
-        env = ActionRepeat(env, int(spec.action_repeat))
-
-    # Discretize continuous actions via prototypes
+    # Discretize continuous actions
     prototypes = np.array(spec.action_prototypes, dtype=np.float32)
-    cont_dim = int(np.prod(env.action_space.shape))
+    cont_dim = env.action_space.shape[0]
     if prototypes.shape[1] != cont_dim:
         raise ValueError(
-            f"action_prototypes dim mismatch: got {prototypes.shape[1]} but env action dim is {cont_dim}. "
-            "Fix configs/dqn.yaml env.action_prototypes."
+            f"action_prototypes dim mismatch: got {prototypes.shape[1]} but env action dim is {cont_dim}"
         )
+
     env = DiscreteActionWrapper(env, prototypes)
 
-    # Frame stack (vector obs)
-    if spec.frame_stack and int(spec.frame_stack) > 1:
-        env = FrameStack(env, int(spec.frame_stack))
+    # Frame stack
+    if spec.frame_stack > 1:
+        env = FrameStack(env, spec.frame_stack)
 
     return env
