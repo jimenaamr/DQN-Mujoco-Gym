@@ -4,6 +4,7 @@ import os
 import time
 from argparse import Namespace
 from typing import Any
+from datetime import datetime
 
 import numpy as np
 import torch
@@ -143,12 +144,14 @@ def main(config_path: str) -> None:
             )
             writer.add_scalar("eval/return_mean", eval_ret, step)
 
-            ckpt_file = os.path.join(ckpt_path, f"step_{step}.pt")
+            timestamp = datetime.now().strftime("%H-%M-%S")
+            ckpt_file = os.path.join(ckpt_path, f"step_{step}_{timestamp}.pt")
             agent.save(ckpt_file)
 
             if eval_ret > best_eval:
                 best_eval = eval_ret
-                agent.save(os.path.join(ckpt_path, "best.pt"))
+                timestamp = datetime.now().strftime("%H-%M-%S")
+                agent.save(os.path.join(ckpt_path, f"best_{timestamp}.pt"))
 
     writer.close()
     train_env.close()

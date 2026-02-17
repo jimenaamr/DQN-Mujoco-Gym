@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from multiprocessing.util import info
 from typing import List
 import cv2
+from gymnasium.wrappers import RecordVideo
 
 import numpy as np
 import gymnasium as gym
@@ -143,4 +144,24 @@ def make_env(spec: EnvSpec, seed: int):
     if spec.frame_stack > 1:
         env = FrameStack(env, spec.frame_stack)
 
+    return env
+
+def make_eval_env(spec: EnvSpec, seed: int, video_dir: str):
+    env = gym.make(spec.env_id, render_mode="rgb_array")
+    env = TimeLimit(env, max_episode_steps=spec.time_limit)
+    env.reset(seed=seed)
+
+    env = RecordVideo(
+        env,
+        video_folder=video_dir,
+        episode_trigger=lambda ep: True,  # graba todos
+        name_prefix="eval",
+        disable_logger=True,
+    )
+
+    env = PixelObservationWrapper(env)
+    prototypes = np.array(spec.action_prototypes, dtype=np.float32)
+    env = DiscreteActionWrapper(env, prototypes)
+    if spec.frame_stack > 1:
+        env = FrameStack(env, spec.frame_stack)
     return env

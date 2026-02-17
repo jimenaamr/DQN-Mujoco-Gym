@@ -6,7 +6,8 @@ import numpy as np
 import yaml
 
 from src.dqn import DQNAgent, DQNConfig
-from src.env import DiscreteActionWrapper, EnvSpec, FrameStack, make_env
+from src.env import DiscreteActionWrapper, EnvSpec, FrameStack, make_env, make_eval_env
+
 
 
 def load_yaml(path: str):
@@ -27,7 +28,8 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
         action_prototypes=e["action_prototypes"],
     )
 
-    env: FrameStack | DiscreteActionWrapper = make_env(spec=env_spec, seed=seed + 999)
+    video_dir = "videos"
+    env = make_eval_env(env_spec, seed=seed + 999, video_dir=video_dir)
 
     t = cfg["train"]
     ex = cfg["exploration"]
