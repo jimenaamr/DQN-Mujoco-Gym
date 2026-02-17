@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
 
 import numpy as np
 import torch
@@ -27,19 +26,24 @@ class DQNConfig:
     device: str
 
 
-def linear_epsilon(step: int, eps_start: float, eps_end: float, decay_steps: int) -> float:
+def linear_epsilon(
+    step: int, eps_start: float, eps_end: float, decay_steps: int
+) -> float:
     if step >= decay_steps:
         return eps_end
-    frac = step / float(decay_steps)
+    frac: float = step / float(decay_steps)
     return eps_start + frac * (eps_end - eps_start)
 
 
 class ReplayBuffer:
-    def __init__(self, obs_shape: Tuple[int, int, int], size: int):
+    def __init__(self, obs_shape: tuple[int, int, int], size: int) -> None:
         self.size = int(size)
         self.idx = 0
         self.full = False
 
+        c: int
+        h: int
+        w: int
         c, h, w = obs_shape
         self.obs = np.zeros((self.size, c, h, w), dtype=np.uint8)
         self.next_obs = np.zeros((self.size, c, h, w), dtype=np.uint8)
@@ -50,7 +54,14 @@ class ReplayBuffer:
     def __len__(self) -> int:
         return self.size if self.full else self.idx
 
-    def add(self, obs: np.ndarray, action: int, reward: float, next_obs: np.ndarray, done: bool) -> None:
+    def add(
+        self,
+        obs: np.ndarray,
+        action: int,
+        reward: float,
+        next_obs: np.ndarray,
+        done: bool,
+    ) -> None:
         self.obs[self.idx] = obs
         self.next_obs[self.idx] = next_obs
         self.actions[self.idx] = action
@@ -66,8 +77,14 @@ class ReplayBuffer:
         max_n = len(self)
         idxs = np.random.randint(0, max_n, size=batch_size)
 
-        obs = torch.from_numpy(self.obs[idxs]).to(device=device, dtype=torch.float32) / 255.0
-        next_obs = torch.from_numpy(self.next_obs[idxs]).to(device=device, dtype=torch.float32) / 255.0
+        obs = (
+            torch.from_numpy(self.obs[idxs]).to(device=device, dtype=torch.float32)
+            / 255.0
+        )
+        next_obs = (
+            torch.from_numpy(self.next_obs[idxs]).to(device=device, dtype=torch.float32)
+            / 255.0
+        )
         actions = torch.from_numpy(self.actions[idxs]).to(device=device)
         rewards = torch.from_numpy(self.rewards[idxs]).to(device=device)
         dones = torch.from_numpy(self.dones[idxs]).to(device=device)
@@ -76,8 +93,11 @@ class ReplayBuffer:
 
 
 class QNetwork(nn.Module):
-    def __init__(self, obs_shape: Tuple[int, int, int], n_actions: int):
+    def __init__(self, obs_shape: tuple[int, int, int], n_actions: int) -> None:
         super().__init__()
+        c: int
+        h: int
+        w: int
         c, h, w = obs_shape
         self.conv = nn.Sequential(
             nn.Conv2d(c, 32, kernel_size=8, stride=4),
@@ -105,25 +125,32 @@ class QNetwork(nn.Module):
 
 
 class DQNAgent:
-    def __init__(self, obs_shape: Tuple[int, int, int], n_actions: int, cfg: DQNConfig):
-        self.cfg = cfg
+    def __init__(
+        self, obs_shape: tuple[int, int, int], n_actions: int, cfg: DQNConfig
+    ) -> None:
+        self.cfg: DQNConfig = cfg
         self.device = torch.device(cfg.device)
 
-        self.q = QNetwork(obs_shape, n_actions).to(self.device)
-        self.q_target = QNetwork(obs_shape, n_actions).to(self.device)
+        self.q = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(self.device)
+        self.q_target = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(
+            self.device
+        )
         self.q_target.load_state_dict(self.q.state_dict())
         self.q_target.eval()
 
         self.opt = torch.optim.Adam(self.q.parameters(), lr=cfg.lr)
-        self.rb = ReplayBuffer(obs_shape, cfg.buffer_size)
+        self.rb = ReplayBuffer(obs_shape=obs_shape, size=cfg.buffer_size)
 
-        self.n_actions = n_actions
+        self.n_actions: int = n_actions
         self.global_step = 0
         self.updates = 0
 
     def epsilon(self) -> float:
         return linear_epsilon(
-            self.global_step, self.cfg.eps_start, self.cfg.eps_end, self.cfg.eps_decay_steps
+            step=self.global_step,
+            eps_start=self.cfg.eps_start,
+            eps_end=self.cfg.eps_end,
+            decay_steps=self.cfg.eps_decay_steps,
         )
 
     @torch.no_grad()
@@ -131,12 +158,22 @@ class DQNAgent:
         if (not eval_mode) and (np.random.rand() < self.epsilon()):
             return int(np.random.randint(0, self.n_actions))
 
-        x = torch.from_numpy(obs).to(self.device, dtype=torch.float32).unsqueeze(0) / 255.0
+        x = (
+            torch.from_numpy(obs).to(self.device, dtype=torch.float32).unsqueeze(0)
+            / 255.0
+        )
         q = self.q(x)
         return int(torch.argmax(q, dim=1).item())
 
-    def store(self, obs: np.ndarray, action: int, reward: float, next_obs: np.ndarray, done: bool) -> None:
-        self.rb.add(obs, action, reward, next_obs, done)
+    def store(
+        self,
+        obs: np.ndarray,
+        action: int,
+        reward: float,
+        next_obs: np.ndarray,
+        done: bool,
+    ) -> None:
+        self.rb.add(obs=obs, action=action, reward=reward, next_obs=next_obs, done=done)
 
     def can_update(self) -> bool:
         if self.global_step < self.cfg.learning_starts:
@@ -145,8 +182,10 @@ class DQNAgent:
             return False
         return (self.global_step % self.cfg.train_freq) == 0
 
-    def update(self) -> Dict[str, float]:
-        obs, actions, rewards, next_obs, dones = self.rb.sample(self.cfg.batch_size, self.device)
+    def update(self) -> dict[str, float]:
+        obs, actions, rewards, next_obs, dones = self.rb.sample(
+            batch_size=self.cfg.batch_size, device=self.device
+        )
 
         with torch.no_grad():
             q_next = self.q_target(next_obs).max(dim=1).values

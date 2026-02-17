@@ -1,20 +1,21 @@
 from __future__ import annotations
 
 import argparse
-import yaml
-import numpy as np
 
-from src.env import EnvSpec, make_env
+import numpy as np
+import yaml
+
 from src.dqn import DQNAgent, DQNConfig
+from src.env import DiscreteActionWrapper, EnvSpec, FrameStack, make_env
 
 
 def load_yaml(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+    with open(file=path, encoding="utf-8") as f:
+        return yaml.safe_load(stream=f)
 
 
 def main(config_path: str, ckpt_path: str, episodes: int) -> None:
-    cfg = load_yaml(config_path)
+    cfg = load_yaml(path=config_path)
     seed = int(cfg["seed"])
 
     e = cfg["env"]
@@ -26,7 +27,7 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
         action_prototypes=e["action_prototypes"],
     )
 
-    env = make_env(env_spec, seed=seed + 999)
+    env: FrameStack | DiscreteActionWrapper = make_env(spec=env_spec, seed=seed + 999)
 
     t = cfg["train"]
     ex = cfg["exploration"]
@@ -47,8 +48,8 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
 
     obs_shape = env.observation_space.shape
     n_actions = env.action_space.n
-    agent = DQNAgent(obs_shape, n_actions, dqn_cfg)
-    agent.load(ckpt_path)
+    agent = DQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=dqn_cfg)
+    agent.load(path=ckpt_path)
 
     returns = []
     for _ in range(episodes):
@@ -56,13 +57,15 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
         done = False
         ep_ret = 0.0
         while not done:
-            a = agent.act(obs, eval_mode=True)
+            a = agent.act(obs=obs, eval_mode=True)
             obs, r, terminated, truncated, _ = env.step(a)
             done = terminated or truncated
             ep_ret += float(r)
         returns.append(ep_ret)
 
-    print(f"episodes={episodes} mean_return={np.mean(returns):.3f} std_return={np.std(returns):.3f}")
+    print(
+        f"episodes={episodes} mean_return={np.mean(returns):.3f} std_return={np.std(returns):.3f}"
+    )
     env.close()
 
 
@@ -71,5 +74,5 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, default="configs/dqn.yaml")
     parser.add_argument("--ckpt", type=str, required=True)
     parser.add_argument("--episodes", type=int, default=10)
-    args = parser.parse_args()
-    main(args.config, args.ckpt, args.episodes)
+    args: argparse.Namespace = parser.parse_args()
+    main(config_path=args.config, ckpt_path=args.ckpt, episodes=args.episodes)
