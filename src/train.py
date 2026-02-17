@@ -87,15 +87,19 @@ def main(config_path: str) -> None:
     os.makedirs(name=run_dir, exist_ok=True)
     os.makedirs(name=ckpt_dir, exist_ok=True)
 
-    run_name: str = f"{env_spec.env_id}_seed{seed}_{int(time.time())}"
-    writer = SummaryWriter(log_dir=os.path.join(run_dir, run_name))
+    run_name = f"{env_spec.env_id}_seed{seed}_{int(time.time())}"
+
+    run_path = os.path.join(run_dir, run_name)
+    ckpt_path = os.path.join(ckpt_dir, run_name)
+
+    os.makedirs(run_path, exist_ok=True)
+    os.makedirs(ckpt_path, exist_ok=True)
+
+    writer = SummaryWriter(log_dir=run_path)
 
     # Save resolved config
-    os.makedirs(name=os.path.join(run_dir, run_name), exist_ok=True)
-    with open(
-        file=os.path.join(run_dir, run_name, "config.yaml"), mode="w", encoding="utf-8"
-    ) as f:
-        yaml.safe_dump(data=cfg, stream=f)
+    with open(os.path.join(run_path, "config.yaml"), "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f)
 
     total_steps = int(cfg["train"]["total_steps"])
     log_every = int(cfg["logging"]["log_every"])
@@ -139,12 +143,12 @@ def main(config_path: str) -> None:
             )
             writer.add_scalar("eval/return_mean", eval_ret, step)
 
-            ckpt_path: str = os.path.join(ckpt_dir, f"{run_name}_step{step}.pt")
-            agent.save(path=ckpt_path)
+            ckpt_file = os.path.join(ckpt_path, f"step_{step}.pt")
+            agent.save(ckpt_file)
 
             if eval_ret > best_eval:
                 best_eval = eval_ret
-                agent.save(path=os.path.join(ckpt_dir, f"{run_name}_best.pt"))
+                agent.save(os.path.join(ckpt_path, "best.pt"))
 
     writer.close()
     train_env.close()

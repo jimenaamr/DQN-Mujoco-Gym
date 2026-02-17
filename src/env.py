@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from multiprocessing.util import info
 from typing import List
 import cv2
 
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
+from gymnasium.wrappers import TimeLimit
 
 
 @dataclass
@@ -41,8 +43,8 @@ class PixelObservationWrapper(gym.Wrapper):
         return frame.astype(np.uint8)
 
     def reset(self, **kwargs):
-        self.env.reset(**kwargs)
-        return self._get_obs(), {}
+        _, info = self.env.reset(**kwargs)
+        return self._get_obs(), info
 
     def step(self, action):
         _, reward, terminated, truncated, info = self.env.step(action)
@@ -76,6 +78,29 @@ class FrameStack(gym.Wrapper):
 
     def _get_obs(self):
         return np.concatenate(self.frames, axis=0)
+    
+
+class ActionRepeat(gym.Wrapper):
+    def __init__(self, env: gym.Env, repeat: int):
+        super().__init__(env)
+        self.repeat = int(repeat)
+
+    def step(self, action):
+        total_reward = 0.0
+        terminated = False
+        truncated = False
+        info = {}
+        obs = None
+
+        for _ in range(self.repeat):
+            obs, r, term, trunc, info = self.env.step(action)
+            total_reward += float(r)
+            terminated = terminated or bool(term)
+            truncated = truncated or bool(trunc)
+            if terminated or truncated:
+                break
+
+        return obs, total_reward, terminated, truncated, info
 
 
 class DiscreteActionWrapper(gym.ActionWrapper):
@@ -90,9 +115,18 @@ class DiscreteActionWrapper(gym.ActionWrapper):
 
 def make_env(spec: EnvSpec, seed: int):
     env = gym.make(spec.env_id, render_mode="rgb_array")
+
+    # 1) Time limit (max steps per episode)
+    env = TimeLimit(env, max_episode_steps=spec.time_limit)
+
+    # 2) Seed
     env.reset(seed=seed)
 
-    # Convert to pixel observation
+    # 3) Action repeat (repeat same action k steps)
+    if spec.action_repeat > 1:
+        env = ActionRepeat(env, spec.action_repeat)
+
+    # 4) Pixels
     env = PixelObservationWrapper(env)
 
     # Discretize continuous actions

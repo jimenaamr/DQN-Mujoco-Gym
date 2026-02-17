@@ -4,16 +4,29 @@ device: "cuda"   # "cpu" si no tienes
 env:
   env_id: "Walker2d-v5"
   frame_stack: 4
-  action_repeat: 1
+  action_repeat: 4
   time_limit: 1000
   # Acciones discretas (prototipos) -> lista de vectores en [-1,1] del tamaño de action_dim (continuous)
   # Ajusta esto según el entorno (action_dim lo puedes imprimir con env.action_space.shape)
   action_prototypes:
-    - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # noop
-    - [ 0.5,  0.5,  0.5,  0.5,  0.5,  0.5]   # forward-ish
-    - [-0.5, -0.5, -0.5, -0.5, -0.5, -0.5]   # backward-ish
-    - [ 1.0,  0.0,  1.0,  0.0,  1.0,  0.0]   # alternating
-    - [ 0.0,  1.0,  0.0,  1.0,  0.0,  1.0]   # alternating 2
+  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop / stabilize
+
+  # Fase A / B (marcha) — amplitud media
+  - [ 0.4,  0.8, -0.4, -0.8,  0.2,  0.4]   # 1 gait A
+  - [-0.4, -0.8,  0.4,  0.8, -0.2, -0.4]   # 2 gait B
+
+  # Fase A / B — un poco más fuerte
+  - [ 0.6,  1.0, -0.6, -1.0,  0.3,  0.6]   # 3 gait A strong
+  - [-0.6, -1.0,  0.6,  1.0, -0.3, -0.6]   # 4 gait B strong
+
+  # Empujes más “simples” (hip/knee-ish)
+  - [ 0.6,  0.0, -0.6,  0.0,  0.0,  0.0]   # 5 hips alternate
+  - [ 0.0,  0.6,  0.0, -0.6,  0.0,  0.0]   # 6 knees alternate
+  - [ 0.0,  0.0,  0.0,  0.0,  0.4, -0.4]   # 7 ankles stabilize-ish
+
+  # Frenos / correcciones
+  - [-0.3,  0.0, -0.3,  0.0,  0.0,  0.0]   # 8 mild back on hips
+  - [ 0.0, -0.3,  0.0, -0.3,  0.0,  0.0]   # 9 mild back on knees
 
 train:
   total_steps: 800000
