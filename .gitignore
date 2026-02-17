@@ -13,8 +13,10 @@ venv/
 *.pth
 
 # Logs y runs
-runs/
-checkpoints/
+runs/*
+checkpoints/*
+!runs/.gitkeep
+!checkpoints/.gitkeep
 
 # TensorBoard
 events.out.tfevents.*
