@@ -167,13 +167,7 @@ class DQNAgent:
         if (not eval_mode) and (np.random.rand() < self.epsilon()):
             return int(np.random.randint(low=0, high=self.n_actions))
 
-        x: Tensor = (
-            torch
-            .from_numpy(ndarray=obs)
-            .to(device=self.device, dtype=torch.float32)
-            .unsqueeze(dim=0)
-            / 255.0
-        )
+        x = torch.from_numpy(obs).float().to(self.device).unsqueeze(0) / 255.0
         q = self.q(x)
         return int(torch.argmax(input=q, dim=1).item())
 
