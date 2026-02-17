@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 
 
 @dataclass
@@ -73,21 +74,27 @@ class ReplayBuffer:
             self.idx = 0
             self.full = True
 
-    def sample(self, batch_size: int, device: torch.device):
-        max_n = len(self)
-        idxs = np.random.randint(0, max_n, size=batch_size)
+    def sample(
+        self, batch_size: int, device: torch.device
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        max_n: int = len(self)
+        idxs = np.random.randint(low=0, high=max_n, size=batch_size)
 
-        obs = (
-            torch.from_numpy(self.obs[idxs]).to(device=device, dtype=torch.float32)
+        obs: Tensor = (
+            torch.from_numpy(ndarray=self.obs[idxs]).to(
+                device=device, dtype=torch.float32
+            )
             / 255.0
         )
-        next_obs = (
-            torch.from_numpy(self.next_obs[idxs]).to(device=device, dtype=torch.float32)
+        next_obs: Tensor = (
+            torch.from_numpy(ndarray=self.next_obs[idxs]).to(
+                device=device, dtype=torch.float32
+            )
             / 255.0
         )
-        actions = torch.from_numpy(self.actions[idxs]).to(device=device)
-        rewards = torch.from_numpy(self.rewards[idxs]).to(device=device)
-        dones = torch.from_numpy(self.dones[idxs]).to(device=device)
+        actions: Tensor = torch.from_numpy(ndarray=self.actions[idxs]).to(device=device)
+        rewards: Tensor = torch.from_numpy(ndarray=self.rewards[idxs]).to(device=device)
+        dones: Tensor = torch.from_numpy(ndarray=self.dones[idxs]).to(device=device)
 
         return obs, actions, rewards, next_obs, dones
 
@@ -100,27 +107,27 @@ class QNetwork(nn.Module):
         w: int
         c, h, w = obs_shape
         self.conv = nn.Sequential(
-            nn.Conv2d(c, 32, kernel_size=8, stride=4),
+            nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4),
             nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
             nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
             nn.ReLU(),
         )
         with torch.no_grad():
-            dummy = torch.zeros(1, c, h, w)
+            dummy: Tensor = torch.zeros(1, c, h, w)
             out = self.conv(dummy)
             flat = out.view(1, -1).shape[1]
 
         self.mlp = nn.Sequential(
-            nn.Linear(flat, 512),
+            nn.Linear(in_features=flat, out_features=512),
             nn.ReLU(),
-            nn.Linear(512, n_actions),
+            nn.Linear(in_features=512, out_features=n_actions),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.conv(x)
-        x = x.view(x.size(0), -1)
+        x = x.view(x.size(dim=0), -1)
         return self.mlp(x)
 
 
@@ -129,16 +136,18 @@ class DQNAgent:
         self, obs_shape: tuple[int, int, int], n_actions: int, cfg: DQNConfig
     ) -> None:
         self.cfg: DQNConfig = cfg
-        self.device = torch.device(cfg.device)
+        self.device = torch.device(device=cfg.device)
 
-        self.q = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(self.device)
-        self.q_target = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(
-            self.device
+        self.q: QNetwork = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(
+            device=self.device
         )
-        self.q_target.load_state_dict(self.q.state_dict())
+        self.q_target: QNetwork = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(
+            device=self.device
+        )
+        self.q_target.load_state_dict(state_dict=self.q.state_dict())
         self.q_target.eval()
 
-        self.opt = torch.optim.Adam(self.q.parameters(), lr=cfg.lr)
+        self.opt = torch.optim.Adam(params=self.q.parameters(), lr=cfg.lr)
         self.rb = ReplayBuffer(obs_shape=obs_shape, size=cfg.buffer_size)
 
         self.n_actions: int = n_actions
@@ -156,14 +165,17 @@ class DQNAgent:
     @torch.no_grad()
     def act(self, obs: np.ndarray, eval_mode: bool = False) -> int:
         if (not eval_mode) and (np.random.rand() < self.epsilon()):
-            return int(np.random.randint(0, self.n_actions))
+            return int(np.random.randint(low=0, high=self.n_actions))
 
-        x = (
-            torch.from_numpy(obs).to(self.device, dtype=torch.float32).unsqueeze(0)
+        x: Tensor = (
+            torch
+            .from_numpy(ndarray=obs)
+            .to(device=self.device, dtype=torch.float32)
+            .unsqueeze(dim=0)
             / 255.0
         )
         q = self.q(x)
-        return int(torch.argmax(q, dim=1).item())
+        return int(torch.argmax(input=q, dim=1).item())
 
     def store(
         self,
@@ -183,6 +195,11 @@ class DQNAgent:
         return (self.global_step % self.cfg.train_freq) == 0
 
     def update(self) -> dict[str, float]:
+        obs: Tensor
+        actions: Tensor
+        rewards: Tensor
+        next_obs: Tensor
+        dones: Tensor
         obs, actions, rewards, next_obs, dones = self.rb.sample(
             batch_size=self.cfg.batch_size, device=self.device
         )
@@ -192,18 +209,20 @@ class DQNAgent:
             target = rewards + self.cfg.gamma * (1.0 - dones) * q_next
 
         q_pred = self.q(obs).gather(1, actions.view(-1, 1)).squeeze(1)
-        loss = F.smooth_l1_loss(q_pred, target)
+        loss: Tensor = F.smooth_l1_loss(input=q_pred, target=target)
 
         self.opt.zero_grad(set_to_none=True)
         loss.backward()
         if self.cfg.grad_clip_norm > 0:
-            nn.utils.clip_grad_norm_(self.q.parameters(), self.cfg.grad_clip_norm)
+            nn.utils.clip_grad_norm_(
+                parameters=self.q.parameters(), max_norm=self.cfg.grad_clip_norm
+            )
         self.opt.step()
 
         self.updates += 1
 
         if (self.global_step % self.cfg.target_update_freq) == 0:
-            self.q_target.load_state_dict(self.q.state_dict())
+            self.q_target.load_state_dict(state_dict=self.q.state_dict())
 
         return {
             "loss": float(loss.item()),
@@ -220,12 +239,12 @@ class DQNAgent:
             "updates": self.updates,
             "cfg": self.cfg.__dict__,
         }
-        torch.save(payload, path)
+        torch.save(obj=payload, f=path)
 
     def load(self, path: str) -> None:
         payload = torch.load(path, map_location=self.device)
-        self.q.load_state_dict(payload["q"])
-        self.q_target.load_state_dict(payload["q_target"])
-        self.opt.load_state_dict(payload["opt"])
+        self.q.load_state_dict(state_dict=payload["q"])
+        self.q_target.load_state_dict(state_dict=payload["q_target"])
+        self.opt.load_state_dict(state_dict=payload["opt"])
         self.global_step = int(payload["global_step"])
         self.updates = int(payload["updates"])
