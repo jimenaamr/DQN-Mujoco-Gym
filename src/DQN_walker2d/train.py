@@ -17,7 +17,11 @@ from tqdm import trange
 from src.DQN_walker2d.dqn import DQNAgent, DQNConfig
 from src.DQN_walker2d.env import EnvSpec, make_env
 from src.DQN_walker2d.gui_viewer import TkLiveViewer
-from src.DQN_walker2d.helper import StabilizerConfig, stabilizer_config_from_yaml
+from src.DQN_walker2d.helper import (
+    StabilizerConfig,
+    resolve_device,
+    stabilizer_config_from_yaml,
+)
 from src.DQN_walker2d.monitoring import MONITOR
 
 os.environ.setdefault(key="MUJOCO_GL", value="egl")
@@ -27,10 +31,10 @@ def load_yaml(path: str) -> dict[str, Any]:
     """Load a YAML file into a Python dictionary.
 
     Args:
-        path: Path to the YAML config file.
+        path: Path to YAML file.
 
     Returns:
-        Parsed YAML content as a dictionary.
+        Parsed YAML content.
     """
     with open(file=path, encoding="utf-8") as f:
         data: dict[str, Any] = yaml.safe_load(stream=f)
@@ -41,10 +45,10 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
     """Convert the `env` section of the config into an EnvSpec.
 
     Args:
-        cfg: Full experiment config.
+        cfg: Full experiment configuration.
 
     Returns:
-        Environment specification parsed from config.
+        Parsed EnvSpec.
     """
     e: dict[str, Any] = cfg["env"]
     return EnvSpec(
@@ -60,14 +64,22 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
 def to_dqn_cfg(cfg: dict[str, Any]) -> DQNConfig:
     """Convert the config into a DQNConfig.
 
+    Notes:
+        This reads the top-level `device` field and normalizes it so:
+        - "cpu" -> "cpu"
+        - "gpu" -> "cuda" if available else "cpu"
+
     Args:
-        cfg: Full experiment config.
+        cfg: Full experiment configuration.
 
     Returns:
-        DQN hyperparameters parsed from config.
+        Parsed DQNConfig.
     """
     t: dict[str, Any] = cfg["train"]
     ex: dict[str, Any] = cfg["exploration"]
+    device_name: str = str(cfg.get("device", "cpu"))
+    device_resolved: str = resolve_device(name=device_name)
+
     return DQNConfig(
         gamma=float(t["gamma"]),
         lr=float(t["lr"]),
@@ -80,7 +92,7 @@ def to_dqn_cfg(cfg: dict[str, Any]) -> DQNConfig:
         eps_start=float(ex["eps_start"]),
         eps_end=float(ex["eps_end"]),
         eps_decay_steps=int(ex["eps_decay_steps"]),
-        device=str(cfg["device"]),
+        device=str(device_resolved),
     )
 
 
@@ -88,13 +100,13 @@ def _extract_last_rgb_frame(obs: np.ndarray) -> np.ndarray:
     """Extract an RGB frame (H, W, 3) from an observation shaped like (C, H, W).
 
     Args:
-        obs: Observation with shape (C, H, W) where C >= 3.
+        obs: Observation array with shape (C, H, W) and C >= 3.
 
     Returns:
         RGB frame with shape (H, W, 3).
 
     Raises:
-        ValueError: If obs is not (C,H,W) or has fewer than 3 channels.
+        ValueError: If obs does not have 3 dims or C < 3.
     """
     if obs.ndim != 3:
         raise ValueError(f"Expected obs with shape (C,H,W), got {obs.shape}")
@@ -116,14 +128,14 @@ def _run_eval_in_subprocess(
     """Run evaluation + video recording in a separate process to isolate EGL.
 
     Args:
-        config_path: Path to the YAML config.
-        checkpoint_path: Path to a saved agent checkpoint.
-        seed: RNG seed for evaluation.
-        episodes: Number of episodes to evaluate.
-        video_dir: Directory where videos will be written.
+        config_path: Path to YAML config.
+        checkpoint_path: Path to agent checkpoint.
+        seed: Evaluation seed.
+        episodes: Number of evaluation episodes.
+        video_dir: Folder where eval videos are written.
 
     Returns:
-        Mean episode return over evaluation episodes.
+        Mean return across episodes.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path: str = os.path.join(tmpdir, "eval_return.txt")
@@ -156,7 +168,7 @@ def _format_legend_text() -> str:
     """Build legend text from the global MONITOR.
 
     Returns:
-        A multi-line string summarizing the current episode metrics.
+        Human-readable debug text for the live viewer overlay.
     """
     return (
         f"episode: {MONITOR.episode_index}\n"
@@ -170,7 +182,7 @@ def _format_legend_text() -> str:
 
 
 def main(config_path: str) -> None:
-    """Train a DQN agent on the configured environment.
+    """Entry point for training.
 
     Args:
         config_path: Path to YAML config file.
@@ -198,6 +210,11 @@ def main(config_path: str) -> None:
 
     dqn_cfg: DQNConfig = to_dqn_cfg(cfg=cfg)
     agent = DQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=dqn_cfg)
+
+    device_raw: str = str(cfg.get("device", "cpu"))
+    print(
+        f"[train] device config: {device_raw} -> resolved: {dqn_cfg.device}", flush=True
+    )
 
     run_dir: str = str(cfg["logging"]["run_dir"])
     ckpt_dir: str = str(cfg["logging"]["ckpt_dir"])

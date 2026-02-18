@@ -11,6 +11,28 @@ import numpy as np
 from src.DQN_walker2d.monitoring import MONITOR
 
 
+def resolve_device(name: str) -> str:
+    """Resolve a user-facing device option into a torch device string.
+
+    Args:
+        name: User-provided device name. Allowed: "cpu", "gpu".
+
+    Returns:
+        "cpu" or "cuda" (if available) depending on `name`.
+
+    Raises:
+        ValueError: If `name` is not one of {"cpu", "gpu"}.
+    """
+    import torch
+
+    normalized: str = str(name).strip().lower()
+    if normalized == "cpu":
+        return "cpu"
+    if normalized == "gpu":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    raise ValueError(f"Invalid device '{name}'. Use 'cpu' or 'gpu'.")
+
+
 @dataclass(frozen=True)
 class StabilizerConfig:
     """Configuration for the head stabilizer forces."""
@@ -194,7 +216,7 @@ class HeadStabilizerWrapper(gym.Wrapper):
 
 
 def _body_speed(data: Any, body_id: int) -> float:
-    """Compute body linear speed magnitude in world coordinates.
+    """Compute body linear speed magnitude.
 
     Args:
         data: MuJoCo MjData-like object.
@@ -224,13 +246,13 @@ def _resolve_body_id(
     """Resolve a MuJoCo body id robustly.
 
     Args:
-        model: MuJoCo MjModel-like object from Gymnasium.
-        primary_name: First name to try (e.g., "head").
-        fallback_name: Second name to try (e.g., "torso").
-        fallback_body_id: Final fallback id (usually 1 = first non-world body).
+        model: MuJoCo model object.
+        primary_name: First name to try.
+        fallback_name: Second name to try.
+        fallback_body_id: Final fallback numeric id.
 
     Returns:
-        Body id to use.
+        Selected body id.
     """
     try:
         return int(model.body(primary_name).id)
@@ -254,10 +276,10 @@ def stabilizer_config_from_yaml(cfg: dict[str, Any]) -> StabilizerConfig | None:
     """Parse `stabilizer:` section from a loaded YAML config.
 
     Args:
-        cfg: Full experiment config.
+        cfg: Full experiment configuration.
 
     Returns:
-        StabilizerConfig if present, otherwise None.
+        Parsed StabilizerConfig or None if not present.
     """
     raw: Any = cfg.get("stabilizer")
     if raw is None:

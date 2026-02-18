@@ -1,5 +1,6 @@
 seed: 0
-device: "cuda"   # "cpu" si no tienes
+device: "gpu"   # "cpu" si no tienes
+# device: "cpu"   # "cpu" si no tienes
 
 env:
   env_id: "Walker2d-v5"

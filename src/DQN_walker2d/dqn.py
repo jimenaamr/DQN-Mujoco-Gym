@@ -1,17 +1,20 @@
+# src/DQN_walker2d/dqn.py
+
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
-import numpy.typing as npt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import Tensor
 
 
 @dataclass
 class DQNConfig:
+    """Hyperparameters and runtime options for DQN."""
+
     gamma: float
     lr: float
     batch_size: int
@@ -28,35 +31,73 @@ class DQNConfig:
     device: str
 
 
-def linear_epsilon(
-    step: int, eps_start: float, eps_end: float, decay_steps: int
-) -> float:
-    if step >= decay_steps:
-        return eps_end
-    frac: float = step / float(decay_steps)
-    return eps_start + frac * (eps_end - eps_start)
+class _QNet(nn.Module):
+    """Simple CNN Q-network for pixel observations (C,H,W)."""
 
-
-class ReplayBuffer:
-    def __init__(self, obs_shape: tuple[int, int, int], size: int) -> None:
-        self.size = int(size)
-        self.idx = 0
-        self.full = False
-
+    def __init__(self, obs_shape: tuple[int, int, int], n_actions: int) -> None:
+        super().__init__()
         c: int
         h: int
         w: int
         c, h, w = obs_shape
-        self.obs: npt.NDArray[np.uint8] = np.zeros((self.size, c, h, w), dtype=np.uint8)
-        self.next_obs: npt.NDArray[np.uint8] = np.zeros(
-            (self.size, c, h, w), dtype=np.uint8
-        )
-        self.actions: npt.NDArray[np.int64] = np.zeros((self.size,), dtype=np.int64)
-        self.rewards: npt.NDArray[np.float32] = np.zeros((self.size,), dtype=np.float32)
-        self.dones: npt.NDArray[np.float32] = np.zeros((self.size,), dtype=np.float32)
 
-    def __len__(self) -> int:
-        return self.size if self.full else self.idx
+        self.conv: nn.Sequential = nn.Sequential(
+            nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
+            nn.ReLU(),
+        )
+
+        with torch.no_grad():
+            dummy: torch.Tensor = torch.zeros(size=(1, c, h, w), dtype=torch.float32)
+            out: torch.Tensor = self.conv(dummy)
+            flat_dim: int = int(out.view(1, -1).shape[1])
+
+        self.head: nn.Sequential = nn.Sequential(
+            nn.Linear(in_features=flat_dim, out_features=512),
+            nn.ReLU(),
+            nn.Linear(in_features=512, out_features=int(n_actions)),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Compute Q-values.
+
+        Args:
+            x: Input tensor with shape (B, C, H, W) in [0,255] or [0,1].
+
+        Returns:
+            Q-values with shape (B, n_actions).
+        """
+        if x.dtype != torch.float32:
+            x = x.float()
+        if x.max() > 1.0:
+            x = x / 255.0
+        y: torch.Tensor = self.conv(x)
+        y = y.view(y.shape[0], -1)
+        return self.head(y)
+
+
+class _ReplayBuffer:
+    """Simple numpy replay buffer for pixel observations."""
+
+    def __init__(self, capacity: int, obs_shape: tuple[int, int, int]) -> None:
+        self.capacity: int = int(capacity)
+        self.obs_shape: tuple[int, int, int] = obs_shape
+
+        self.obs: np.ndarray = np.zeros(
+            shape=(self.capacity, *obs_shape), dtype=np.uint8
+        )
+        self.next_obs: np.ndarray = np.zeros(
+            shape=(self.capacity, *obs_shape), dtype=np.uint8
+        )
+        self.actions: np.ndarray = np.zeros(shape=(self.capacity,), dtype=np.int64)
+        self.rewards: np.ndarray = np.zeros(shape=(self.capacity,), dtype=np.float32)
+        self.dones: np.ndarray = np.zeros(shape=(self.capacity,), dtype=np.bool_)
+
+        self.size: int = 0
+        self.pos: int = 0
 
     def add(
         self,
@@ -66,110 +107,99 @@ class ReplayBuffer:
         next_obs: np.ndarray,
         done: bool,
     ) -> None:
-        self.obs[self.idx] = obs
-        self.next_obs[self.idx] = next_obs
-        self.actions[self.idx] = action
-        self.rewards[self.idx] = reward
-        self.dones[self.idx] = 1.0 if done else 0.0
+        """Insert a transition into the buffer."""
+        self.obs[self.pos] = obs
+        self.next_obs[self.pos] = next_obs
+        self.actions[self.pos] = int(action)
+        self.rewards[self.pos] = float(reward)
+        self.dones[self.pos] = bool(done)
 
-        self.idx += 1
-        if self.idx >= self.size:
-            self.idx = 0
-            self.full = True
+        self.pos = int((self.pos + 1) % self.capacity)
+        self.size = int(min(self.size + 1, self.capacity))
 
-    def sample(
-        self, batch_size: int, device: torch.device
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
-        max_n: int = len(self)
-        idxs: npt.NDArray[np.int64] = np.random.randint(
-            low=0, high=max_n, size=batch_size
-        )
+    def sample(self, batch_size: int) -> dict[str, np.ndarray]:
+        """Sample a batch of transitions.
 
-        obs: Tensor = torch.from_numpy(self.obs[idxs]).float().to(device=device) / 255.0
-        next_obs: Tensor = (
-            torch.from_numpy(self.next_obs[idxs]).float().to(device=device) / 255.0
-        )
-        actions: Tensor = torch.from_numpy(self.actions[idxs]).to(device=device)
-        rewards: Tensor = torch.from_numpy(self.rewards[idxs]).to(device=device)
-        dones: Tensor = torch.from_numpy(self.dones[idxs]).to(device=device)
+        Args:
+            batch_size: Number of samples.
 
-        return obs, actions, rewards, next_obs, dones
-
-
-class QNetwork(nn.Module):
-    def __init__(self, obs_shape: tuple[int, int, int], n_actions: int) -> None:
-        super().__init__()
-        c: int
-        h: int
-        w: int
-        c, h, w = obs_shape
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
-            nn.ReLU(),
-        )
-        with torch.no_grad():
-            dummy: Tensor = torch.zeros(1, c, h, w)
-            out = self.conv(dummy)
-            flat = out.view(1, -1).shape[1]
-
-        self.mlp = nn.Sequential(
-            nn.Linear(in_features=flat, out_features=512),
-            nn.ReLU(),
-            nn.Linear(in_features=512, out_features=n_actions),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv(x)
-        x = x.view(x.size(dim=0), -1)
-        return self.mlp(x)
+        Returns:
+            Batch dict of numpy arrays.
+        """
+        idx: np.ndarray = np.random.randint(low=0, high=self.size, size=(batch_size,))
+        return {
+            "obs": self.obs[idx],
+            "next_obs": self.next_obs[idx],
+            "actions": self.actions[idx],
+            "rewards": self.rewards[idx],
+            "dones": self.dones[idx],
+        }
 
 
 class DQNAgent:
+    """DQN agent with epsilon-greedy policy and target network."""
+
     def __init__(
-        self, obs_shape: tuple[int, int, int], n_actions: int, cfg: DQNConfig
+        self,
+        obs_shape: tuple[int, int, int],
+        n_actions: int,
+        cfg: DQNConfig,
     ) -> None:
         self.cfg: DQNConfig = cfg
-        self.device = torch.device(device=cfg.device)
+        self.device: torch.device = torch.device(str(cfg.device))
 
-        self.q: QNetwork = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(
+        self.n_actions: int = int(n_actions)
+        self.q: _QNet = _QNet(obs_shape=obs_shape, n_actions=self.n_actions).to(
             device=self.device
         )
-        self.q_target: QNetwork = QNetwork(obs_shape=obs_shape, n_actions=n_actions).to(
+        self.q_target: _QNet = _QNet(obs_shape=obs_shape, n_actions=self.n_actions).to(
             device=self.device
         )
-        self.q_target.load_state_dict(state_dict=self.q.state_dict())
+        self.q_target.load_state_dict(self.q.state_dict())
         self.q_target.eval()
 
-        self.opt = torch.optim.Adam(params=self.q.parameters(), lr=cfg.lr)
-        self.rb = ReplayBuffer(obs_shape=obs_shape, size=cfg.buffer_size)
-
-        self.n_actions: int = n_actions
-        self.global_step = 0
-        self.updates = 0
-
-    def epsilon(self) -> float:
-        return linear_epsilon(
-            step=self.global_step,
-            eps_start=self.cfg.eps_start,
-            eps_end=self.cfg.eps_end,
-            decay_steps=self.cfg.eps_decay_steps,
+        self.opt: torch.optim.Optimizer = torch.optim.Adam(
+            params=self.q.parameters(),
+            lr=float(cfg.lr),
         )
 
-    @torch.no_grad()
-    def act(self, obs: np.ndarray, eval_mode: bool = False) -> int:
-        if (not eval_mode) and (np.random.rand() < self.epsilon()):
+        self.buffer: _ReplayBuffer = _ReplayBuffer(
+            capacity=int(cfg.buffer_size),
+            obs_shape=obs_shape,
+        )
+
+        self.global_step: int = 0
+
+    def act(self, obs: np.ndarray, eval_mode: bool) -> int:
+        """Select an action with epsilon-greedy exploration.
+
+        Args:
+            obs: Observation (C,H,W) uint8.
+            eval_mode: If True, disable exploration.
+
+        Returns:
+            Discrete action index.
+        """
+        if eval_mode:
+            eps: float = 0.0
+        else:
+            eps = float(
+                _linear_epsilon(
+                    step=int(self.global_step),
+                    eps_start=float(self.cfg.eps_start),
+                    eps_end=float(self.cfg.eps_end),
+                    decay_steps=int(self.cfg.eps_decay_steps),
+                )
+            )
+
+        if (not eval_mode) and (float(np.random.rand()) < eps):
             return int(np.random.randint(low=0, high=self.n_actions))
 
-        x: Tensor = (
-            torch.from_numpy(obs).float().to(device=self.device).unsqueeze(dim=0)
-            / 255.0
-        )
-        q = self.q(x)
-        return int(torch.argmax(input=q, dim=1).item())
+        with torch.no_grad():
+            x: torch.Tensor = torch.as_tensor(obs, device=self.device).unsqueeze(0)
+            qvals: torch.Tensor = self.q(x)
+            a: int = int(torch.argmax(qvals, dim=1).item())
+        return a
 
     def store(
         self,
@@ -179,66 +209,112 @@ class DQNAgent:
         next_obs: np.ndarray,
         done: bool,
     ) -> None:
-        self.rb.add(obs=obs, action=action, reward=reward, next_obs=next_obs, done=done)
-
-    def can_update(self) -> bool:
-        if self.global_step < self.cfg.learning_starts:
-            return False
-        if len(self.rb) < self.cfg.batch_size:
-            return False
-        return (self.global_step % self.cfg.train_freq) == 0
-
-    def update(self) -> dict[str, float]:
-        obs: Tensor
-        actions: Tensor
-        rewards: Tensor
-        next_obs: Tensor
-        dones: Tensor
-        obs, actions, rewards, next_obs, dones = self.rb.sample(
-            batch_size=self.cfg.batch_size, device=self.device
+        """Store a transition in replay buffer."""
+        self.buffer.add(
+            obs=obs,
+            action=int(action),
+            reward=float(reward),
+            next_obs=next_obs,
+            done=bool(done),
         )
 
-        with torch.no_grad():
-            q_next = self.q_target(next_obs).max(dim=1).values
-            target = rewards + self.cfg.gamma * (1.0 - dones) * q_next
+    def can_update(self) -> bool:
+        """Check whether the agent should run a gradient update."""
+        if int(self.buffer.size) < int(self.cfg.learning_starts):
+            return False
+        return (int(self.global_step) % int(self.cfg.train_freq)) == 0
 
-        q_pred = self.q(obs).gather(1, actions.view(-1, 1)).squeeze(1)
-        loss: Tensor = F.smooth_l1_loss(input=q_pred, target=target)
+    def update(self) -> dict[str, float]:
+        """Run a single DQN update step.
+
+        Returns:
+            Dict with scalar metrics for logging.
+        """
+        batch: dict[str, np.ndarray] = self.buffer.sample(
+            batch_size=int(self.cfg.batch_size)
+        )
+
+        obs: torch.Tensor = torch.as_tensor(batch["obs"], device=self.device)
+        next_obs: torch.Tensor = torch.as_tensor(batch["next_obs"], device=self.device)
+        actions: torch.Tensor = torch.as_tensor(batch["actions"], device=self.device)
+        rewards: torch.Tensor = torch.as_tensor(batch["rewards"], device=self.device)
+        dones: torch.Tensor = torch.as_tensor(batch["dones"], device=self.device)
+
+        qvals: torch.Tensor = self.q(obs)
+        q_a: torch.Tensor = qvals.gather(dim=1, index=actions.view(-1, 1)).squeeze(1)
+
+        with torch.no_grad():
+            next_qvals: torch.Tensor = self.q_target(next_obs)
+            next_max: torch.Tensor = next_qvals.max(dim=1).values
+            target: torch.Tensor = (
+                rewards + (1.0 - dones.float()) * float(self.cfg.gamma) * next_max
+            )
+
+        loss: torch.Tensor = F.smooth_l1_loss(q_a, target)
 
         self.opt.zero_grad(set_to_none=True)
         loss.backward()
-        if self.cfg.grad_clip_norm > 0:
-            nn.utils.clip_grad_norm_(
-                parameters=self.q.parameters(), max_norm=self.cfg.grad_clip_norm
-            )
+        nn.utils.clip_grad_norm_(
+            self.q.parameters(), max_norm=float(self.cfg.grad_clip_norm)
+        )
         self.opt.step()
 
-        self.updates += 1
+        if (int(self.global_step) % int(self.cfg.target_update_freq)) == 0:
+            self.q_target.load_state_dict(self.q.state_dict())
 
-        if (self.global_step % self.cfg.target_update_freq) == 0:
-            self.q_target.load_state_dict(state_dict=self.q.state_dict())
-
-        return {
-            "loss": float(loss.item()),
-            "q_mean": float(q_pred.mean().item()),
-            "epsilon": float(self.epsilon()),
-        }
+        return {"loss": float(loss.detach().cpu().item())}
 
     def save(self, path: str) -> None:
-        payload = {
-            "q": self.q.state_dict(),
-            "q_target": self.q_target.state_dict(),
-            "opt": self.opt.state_dict(),
-            "global_step": self.global_step,
-            "updates": self.updates,
+        """Save agent parameters to disk.
+
+        Args:
+            path: Output checkpoint path.
+        """
+        payload: dict[str, Any] = {
+            "q_state": self.q.state_dict(),
+            "q_target_state": self.q_target.state_dict(),
+            "opt_state": self.opt.state_dict(),
             "cfg": self.cfg.__dict__,
         }
-        torch.save(obj=payload, f=path)
+        torch.save(obj=payload, f=str(path))
 
     def load(self, path: str) -> None:
-        payload = torch.load(f=path, map_location=self.device)
-        self.q.load_state_dict(state_dict=payload["q"])
-        self.q_target.load_state_dict(state_dict=payload["q_target"])
-        self.opt.load_state_dict(state_dict=payload["opt"])
-        self.global_step = int(payload["global_step"])
-        self.updates = int(payload["updates"])
+        """Load agent weights and optimizer state from a checkpoint."""
+        ckpt: dict[str, Any] = torch.load(path, map_location=self.device)
+
+        q_state: dict[str, Any] | None = ckpt.get("q")
+        if q_state is None:
+            q_state = ckpt.get("q_state")
+
+        if q_state is None:
+            raise KeyError(f"Checkpoint missing Q state. Keys: {list(ckpt.keys())}")
+
+        self.q.load_state_dict(q_state)
+
+        q_target_state: dict[str, Any] | None = ckpt.get("q_target")
+        if q_target_state is not None and hasattr(self, "q_target"):
+            self.q_target.load_state_dict(q_target_state)
+
+        opt_state: dict[str, Any] | None = ckpt.get("opt")
+        if opt_state is not None and hasattr(self, "optimizer"):
+            self.optimizer.load_state_dict(opt_state)
+
+
+def _linear_epsilon(
+    step: int, eps_start: float, eps_end: float, decay_steps: int
+) -> float:
+    """Linear epsilon schedule.
+
+    Args:
+        step: Current global step.
+        eps_start: Initial epsilon.
+        eps_end: Final epsilon.
+        decay_steps: Steps over which epsilon decays linearly.
+
+    Returns:
+        Epsilon value at `step`.
+    """
+    if decay_steps <= 0:
+        return float(eps_end)
+    t: float = float(np.clip(step / decay_steps, 0.0, 1.0))
+    return float((1.0 - t) * eps_start + t * eps_end)
