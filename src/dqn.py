@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import numpy.typing as npt
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -46,11 +47,13 @@ class ReplayBuffer:
         h: int
         w: int
         c, h, w = obs_shape
-        self.obs = np.zeros((self.size, c, h, w), dtype=np.uint8)
-        self.next_obs = np.zeros((self.size, c, h, w), dtype=np.uint8)
-        self.actions = np.zeros((self.size,), dtype=np.int64)
-        self.rewards = np.zeros((self.size,), dtype=np.float32)
-        self.dones = np.zeros((self.size,), dtype=np.float32)
+        self.obs: npt.NDArray[np.uint8] = np.zeros((self.size, c, h, w), dtype=np.uint8)
+        self.next_obs: npt.NDArray[np.uint8] = np.zeros(
+            (self.size, c, h, w), dtype=np.uint8
+        )
+        self.actions: npt.NDArray[np.int64] = np.zeros((self.size,), dtype=np.int64)
+        self.rewards: npt.NDArray[np.float32] = np.zeros((self.size,), dtype=np.float32)
+        self.dones: npt.NDArray[np.float32] = np.zeros((self.size,), dtype=np.float32)
 
     def __len__(self) -> int:
         return self.size if self.full else self.idx
@@ -78,14 +81,21 @@ class ReplayBuffer:
         self, batch_size: int, device: torch.device
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         max_n: int = len(self)
-        idxs = np.random.randint(low=0, high=max_n, size=batch_size)
+        idxs: npt.NDArray[np.int64] = np.random.randint(
+            low=0, high=max_n, size=batch_size
+        )
 
-        obs = torch.from_numpy(self.obs[idxs]).float().to(device) / 255.0
-        next_obs = torch.from_numpy(self.next_obs[idxs]).float().to(device) / 255.0
-        actions = torch.from_numpy(self.actions[idxs]).to(device)
-        rewards = torch.from_numpy(self.rewards[idxs]).to(device)
-        dones = torch.from_numpy(self.dones[idxs]).to(device)
-        
+        obs: Tensor = (
+            torch.from_numpy(ndarray=self.obs[idxs]).float().to(device=device) / 255.0
+        )
+        next_obs: Tensor = (
+            torch.from_numpy(ndarray=self.next_obs[idxs]).float().to(device=device)
+            / 255.0
+        )
+        actions: Tensor = torch.from_numpy(ndarray=self.actions[idxs]).to(device=device)
+        rewards: Tensor = torch.from_numpy(ndarray=self.rewards[idxs]).to(device=device)
+        dones: Tensor = torch.from_numpy(ndarray=self.dones[idxs]).to(device=device)
+
         return obs, actions, rewards, next_obs, dones
 
 
@@ -157,7 +167,14 @@ class DQNAgent:
         if (not eval_mode) and (np.random.rand() < self.epsilon()):
             return int(np.random.randint(low=0, high=self.n_actions))
 
-        x = torch.from_numpy(obs).float().to(self.device).unsqueeze(0) / 255.0
+        x: Tensor = (
+            torch
+            .from_numpy(ndarray=obs)
+            .float()
+            .to(device=self.device)
+            .unsqueeze(dim=0)
+            / 255.0
+        )
         q = self.q(x)
         return int(torch.argmax(input=q, dim=1).item())
 
@@ -226,7 +243,7 @@ class DQNAgent:
         torch.save(obj=payload, f=path)
 
     def load(self, path: str) -> None:
-        payload = torch.load(path, map_location=self.device)
+        payload = torch.load(f=path, map_location=self.device)
         self.q.load_state_dict(state_dict=payload["q"])
         self.q_target.load_state_dict(state_dict=payload["q_target"])
         self.opt.load_state_dict(state_dict=payload["opt"])

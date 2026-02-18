@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import time
 from argparse import Namespace
-from typing import Any
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 import torch
@@ -77,7 +77,9 @@ def main(config_path: str) -> None:
         spec=env_spec, seed=seed + 123
     )
 
-    obs_shape = train_env.observation_space.shape  # vector (n,) or stacked (k*n,)
+    obs_shape: tuple[int, ...] | None = (
+        train_env.observation_space.shape
+    )  # vector (n,) or stacked (k*n,)
     n_actions = train_env.action_space.n
 
     dqn_cfg: DQNConfig = to_dqn_cfg(cfg=cfg)
@@ -88,19 +90,21 @@ def main(config_path: str) -> None:
     os.makedirs(name=run_dir, exist_ok=True)
     os.makedirs(name=ckpt_dir, exist_ok=True)
 
-    run_name = f"{env_spec.env_id}_seed{seed}_{int(time.time())}"
+    run_name: str = f"{env_spec.env_id}_seed{seed}_{int(time.time())}"
 
-    run_path = os.path.join(run_dir, run_name)
-    ckpt_path = os.path.join(ckpt_dir, run_name)
+    run_path: str = os.path.join(run_dir, run_name)
+    ckpt_path: str = os.path.join(ckpt_dir, run_name)
 
-    os.makedirs(run_path, exist_ok=True)
-    os.makedirs(ckpt_path, exist_ok=True)
+    os.makedirs(name=run_path, exist_ok=True)
+    os.makedirs(name=ckpt_path, exist_ok=True)
 
     writer = SummaryWriter(log_dir=run_path)
 
     # Save resolved config
-    with open(os.path.join(run_path, "config.yaml"), "w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg, f)
+    with open(
+        file=os.path.join(run_path, "config.yaml"), mode="w", encoding="utf-8"
+    ) as f:
+        yaml.safe_dump(data=cfg, stream=f)
 
     total_steps = int(cfg["train"]["total_steps"])
     log_every = int(cfg["logging"]["log_every"])
@@ -116,6 +120,9 @@ def main(config_path: str) -> None:
         agent.global_step = step
 
         a: int = agent.act(obs=obs, eval_mode=False)
+        r: float
+        terminated: bool
+        truncated: bool
         next_obs, r, terminated, truncated, _ = train_env.step(a)
         done = bool(terminated or truncated)
 
@@ -129,11 +136,17 @@ def main(config_path: str) -> None:
             metrics: dict[str, float] = agent.update()
             if step % log_every == 0:
                 for k, v in metrics.items():
-                    writer.add_scalar(f"train/{k}", v, step)
+                    writer.add_scalar(
+                        tag=f"train/{k}", scalar_value=v, global_step=step
+                    )
 
         if done:
-            writer.add_scalar("train/episode_return", ep_ret, step)
-            writer.add_scalar("train/episode_length", ep_len, step)
+            writer.add_scalar(
+                tag="train/episode_return", scalar_value=ep_ret, global_step=step
+            )
+            writer.add_scalar(
+                tag="train/episode_length", scalar_value=ep_len, global_step=step
+            )
             obs, _ = train_env.reset()
             ep_ret = 0.0
             ep_len = 0
@@ -142,16 +155,18 @@ def main(config_path: str) -> None:
             eval_ret: float = evaluate(
                 agent=agent, env=eval_env, episodes=eval_episodes
             )
-            writer.add_scalar("eval/return_mean", eval_ret, step)
+            writer.add_scalar(
+                tag="eval/return_mean", scalar_value=eval_ret, global_step=step
+            )
 
-            timestamp = datetime.now().strftime("%H-%M-%S")
-            ckpt_file = os.path.join(ckpt_path, f"step_{step}_{timestamp}.pt")
-            agent.save(ckpt_file)
+            timestamp = datetime.now().strftime(format="%H-%M-%S")
+            ckpt_file: str = os.path.join(ckpt_path, f"step_{step}_{timestamp}.pt")
+            agent.save(path=ckpt_file)
 
             if eval_ret > best_eval:
                 best_eval = eval_ret
-                timestamp = datetime.now().strftime("%H-%M-%S")
-                agent.save(os.path.join(ckpt_path, f"best_{timestamp}.pt"))
+                timestamp: str = datetime.now().strftime(format="%H-%M-%S")
+                agent.save(path=os.path.join(ckpt_path, f"best_{timestamp}.pt"))
 
     writer.close()
     train_env.close()

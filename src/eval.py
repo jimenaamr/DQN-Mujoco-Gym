@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import argparse
+from typing import SupportsFloat
 
 import numpy as np
 import yaml
 
 from src.dqn import DQNAgent, DQNConfig
-from src.env import DiscreteActionWrapper, EnvSpec, FrameStack, make_env, make_eval_env
-
+from src.env import EnvSpec, make_eval_env
 
 
 def load_yaml(path: str):
@@ -29,7 +29,7 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
     )
 
     video_dir = "videos"
-    env = make_eval_env(env_spec, seed=seed + 999, video_dir=video_dir)
+    env = make_eval_env(spec=env_spec, seed=seed + 999, video_dir=video_dir)
 
     t = cfg["train"]
     ex = cfg["exploration"]
@@ -48,7 +48,7 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
         device=str(cfg["device"]),
     )
 
-    obs_shape = env.observation_space.shape
+    obs_shape: tuple[int, ...] | None = env.observation_space.shape
     n_actions = env.action_space.n
     agent = DQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=dqn_cfg)
     agent.load(path=ckpt_path)
@@ -59,14 +59,19 @@ def main(config_path: str, ckpt_path: str, episodes: int) -> None:
         done = False
         ep_ret = 0.0
         while not done:
-            a = agent.act(obs=obs, eval_mode=True)
-            obs, r, terminated, truncated, _ = env.step(a)
-            done = terminated or truncated
+            a: int = agent.act(obs=obs, eval_mode=True)
+            r: SupportsFloat
+            terminated: bool
+            truncated: bool
+            obs, r, terminated, truncated, _ = env.step(action=a)
+            done: bool = terminated or truncated
             ep_ret += float(r)
         returns.append(ep_ret)
 
     print(
-        f"episodes={episodes} mean_return={np.mean(returns):.3f} std_return={np.std(returns):.3f}"
+        f"episodes={episodes} "
+        f"mean_return={np.mean(a=returns):.3f} "
+        f"std_return={np.std(a=returns):.3f}"
     )
     env.close()
 
