@@ -24,14 +24,28 @@ os.environ.setdefault(key="MUJOCO_GL", value="egl")
 
 
 def load_yaml(path: str) -> dict[str, Any]:
-    """Load a YAML file into a Python dictionary."""
+    """Load a YAML file into a Python dictionary.
+
+    Args:
+        path: Path to the YAML config file.
+
+    Returns:
+        Parsed YAML content as a dictionary.
+    """
     with open(file=path, encoding="utf-8") as f:
         data: dict[str, Any] = yaml.safe_load(stream=f)
     return data
 
 
 def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
-    """Convert the `env` section of the config into an EnvSpec."""
+    """Convert the `env` section of the config into an EnvSpec.
+
+    Args:
+        cfg: Full experiment config.
+
+    Returns:
+        Environment specification parsed from config.
+    """
     e: dict[str, Any] = cfg["env"]
     return EnvSpec(
         env_id=str(e["env_id"]),
@@ -44,7 +58,14 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
 
 
 def to_dqn_cfg(cfg: dict[str, Any]) -> DQNConfig:
-    """Convert the config into a DQNConfig."""
+    """Convert the config into a DQNConfig.
+
+    Args:
+        cfg: Full experiment config.
+
+    Returns:
+        DQN hyperparameters parsed from config.
+    """
     t: dict[str, Any] = cfg["train"]
     ex: dict[str, Any] = cfg["exploration"]
     return DQNConfig(
@@ -64,7 +85,17 @@ def to_dqn_cfg(cfg: dict[str, Any]) -> DQNConfig:
 
 
 def _extract_last_rgb_frame(obs: np.ndarray) -> np.ndarray:
-    """Extract an RGB frame (H, W, 3) from an observation shaped like (C, H, W)."""
+    """Extract an RGB frame (H, W, 3) from an observation shaped like (C, H, W).
+
+    Args:
+        obs: Observation with shape (C, H, W) where C >= 3.
+
+    Returns:
+        RGB frame with shape (H, W, 3).
+
+    Raises:
+        ValueError: If obs is not (C,H,W) or has fewer than 3 channels.
+    """
     if obs.ndim != 3:
         raise ValueError(f"Expected obs with shape (C,H,W), got {obs.shape}")
     c: int = int(obs.shape[0])
@@ -82,7 +113,18 @@ def _run_eval_in_subprocess(
     episodes: int,
     video_dir: str,
 ) -> float:
-    """Run evaluation + video recording in a separate process to isolate EGL."""
+    """Run evaluation + video recording in a separate process to isolate EGL.
+
+    Args:
+        config_path: Path to the YAML config.
+        checkpoint_path: Path to a saved agent checkpoint.
+        seed: RNG seed for evaluation.
+        episodes: Number of episodes to evaluate.
+        video_dir: Directory where videos will be written.
+
+    Returns:
+        Mean episode return over evaluation episodes.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path: str = os.path.join(tmpdir, "eval_return.txt")
 
@@ -111,7 +153,11 @@ def _run_eval_in_subprocess(
 
 
 def _format_legend_text() -> str:
-    """Build legend text from the global MONITOR."""
+    """Build legend text from the global MONITOR.
+
+    Returns:
+        A multi-line string summarizing the current episode metrics.
+    """
     return (
         f"episode: {MONITOR.episode_index}\n"
         f"raw reward: {MONITOR.raw_reward:.3f}\n"
@@ -124,6 +170,11 @@ def _format_legend_text() -> str:
 
 
 def main(config_path: str) -> None:
+    """Train a DQN agent on the configured environment.
+
+    Args:
+        config_path: Path to YAML config file.
+    """
     cfg: dict[str, Any] = load_yaml(path=config_path)
     seed: int = int(cfg["seed"])
 
@@ -200,8 +251,6 @@ def main(config_path: str) -> None:
             agent.global_step = int(step)
 
             if (render_every > 0) and ((step % render_every) == 0):
-                # frame_rgb: np.ndarray = _extract_last_rgb_frame(obs=obs)
-                # viewer.push(frame_rgb=frame_rgb, legend_text=_format_legend_text())
                 frame_rgb: np.ndarray = np.ascontiguousarray(
                     _extract_last_rgb_frame(obs=obs)
                 )

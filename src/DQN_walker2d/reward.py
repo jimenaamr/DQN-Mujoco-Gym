@@ -1,3 +1,5 @@
+# src/DQN_walker2d/reward.py
+
 from __future__ import annotations
 
 import gymnasium as gym
@@ -14,8 +16,7 @@ def walker2d_default_reward(
     env_reward: float,
     env: gym.Env,
 ) -> float:
-    """
-    Reproduce the default Walker2d reward exactly.
+    """Reproduce the default Walker2d reward exactly.
 
     Total reward:
         reward = healthy_reward + forward_reward - ctrl_cost
@@ -36,8 +37,6 @@ def walker2d_default_reward(
     Returns:
         The reconstructed default reward.
     """
-    # _ = obs, action, next_obs, terminated, truncated, env
-
     healthy_reward: float = float(info.get("reward_survive", 0.0))
     forward_reward: float = float(info.get("reward_forward", 0.0))
     ctrl_cost: float = float(info.get("reward_ctrl", 0.0))

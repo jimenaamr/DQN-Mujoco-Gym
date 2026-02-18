@@ -11,44 +11,59 @@ env:
   # Acciones discretas (prototipos) -> lista de vectores en [-1,1] del tamaño de action_dim (continuous)
   # Ajusta esto según el entorno (action_dim lo puedes imprimir con env.action_space.shape)
   action_prototypes:
-  # - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop / stabilize
 
-  # # Fase A / B (marcha) — amplitud media
-  # - [ 0.4,  0.8, -0.4, -0.8,  0.2,  0.4]   # 1 gait A
-  # - [-0.4, -0.8,  0.4,  0.8, -0.2, -0.4]   # 2 gait B
+  # - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop
 
-  # # Fase A / B — un poco más fuerte
-  # - [ 0.6,  1.0, -0.6, -1.0,  0.3,  0.6]   # 3 gait A strong
-  # - [-0.6, -1.0,  0.6,  1.0, -0.3, -0.6]   # 4 gait B strong
+  # # gait A / B (media)
+  # - [-0.4, -0.8,  0.4,  0.4,  0.8,  0.2]   # 1 gait A (reordenada)
+  # - [ 0.4,  0.8, -0.4, -0.4, -0.8, -0.2]   # 2 gait B (reordenada)
 
-  # # Empujes más “simples” (hip/knee-ish)
-  # - [ 0.6,  0.0, -0.6,  0.0,  0.0,  0.0]   # 5 hips alternate
-  # - [ 0.0,  0.6,  0.0, -0.6,  0.0,  0.0]   # 6 knees alternate
-  # - [ 0.0,  0.0,  0.0,  0.0,  0.4, -0.4]   # 7 ankles stabilize-ish
+  # # gait A / B (fuerte)
+  # - [-0.6, -1.0,  0.6,  0.6,  1.0,  0.3]   # 3 gait A strong (reordenada)
+  # - [ 0.6,  1.0, -0.6, -0.6, -1.0, -0.3]   # 4 gait B strong (reordenada)
 
-  # # Frenos / correcciones
-  # - [-0.3,  0.0, -0.3,  0.0,  0.0,  0.0]   # 8 mild back on hips
-  # - [ 0.0, -0.3,  0.0, -0.3,  0.0,  0.0]   # 9 mild back on knees
+  # # empujes simples
+  # - [-0.6,  0.0,  0.0,  0.6,  0.0,  0.0]   # 5 thighs alternate (reordenada)
+  # - [ 0.0, -0.6,  0.0,  0.0,  0.6,  0.0]   # 6 legs alternate (reordenada)
+  # - [ 0.0,  0.0, -0.4,  0.0,  0.0,  0.4]   # 7 feet stabilize-ish (reordenada)
+
+  # # frenos
+  # - [-0.3,  0.0,  0.0, -0.3,  0.0,  0.0]   # 8 mild back on thighs (reordenada)
+  # - [ 0.0, -0.3,  0.0,  0.0, -0.3,  0.0]   # 9 mild back on legs (reordenada)
 
 
-  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop
 
-  # gait A / B (media)
-  - [-0.4, -0.8,  0.4,  0.4,  0.8,  0.2]   # 1 gait A (reordenada)
-  - [ 0.4,  0.8, -0.4, -0.4, -0.8, -0.2]   # 2 gait B (reordenada)
+  # 0) noop
+  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]
 
-  # gait A / B (fuerte)
-  - [-0.6, -1.0,  0.6,  0.6,  1.0,  0.3]   # 3 gait A strong (reordenada)
-  - [ 0.6,  1.0, -0.6, -0.6, -1.0, -0.3]   # 4 gait B strong (reordenada)
+  # 1-4) micro acciones por articulación (exploración barata)
+  - [ 0.2,  0.0,  0.0,  0.2,  0.0,  0.0]   # hips small +
+  - [-0.2,  0.0,  0.0, -0.2,  0.0,  0.0]   # hips small -
+  - [ 0.0,  0.2,  0.0,  0.0,  0.2,  0.0]   # knees small +
+  - [ 0.0, -0.2,  0.0,  0.0, -0.2,  0.0]   # knees small -
 
-  # empujes simples
-  - [-0.6,  0.0,  0.0,  0.6,  0.0,  0.0]   # 5 thighs alternate (reordenada)
-  - [ 0.0, -0.6,  0.0,  0.0,  0.6,  0.0]   # 6 legs alternate (reordenada)
-  - [ 0.0,  0.0, -0.4,  0.0,  0.0,  0.4]   # 7 feet stabilize-ish (reordenada)
+  # 5-8) tobillos: muy útiles para estabilidad
+  - [ 0.0,  0.0,  0.25, 0.0,  0.0,  0.25]  # ankles small +
+  - [ 0.0,  0.0, -0.25, 0.0,  0.0, -0.25]  # ankles small -
+  - [ 0.0,  0.0,  0.35, 0.0,  0.0, -0.35]  # ankle split (rollover)
+  - [ 0.0,  0.0, -0.35, 0.0,  0.0,  0.35]  # ankle split opposite
 
-  # frenos
-  - [-0.3,  0.0,  0.0, -0.3,  0.0,  0.0]   # 8 mild back on thighs (reordenada)
-  - [ 0.0, -0.3,  0.0,  0.0, -0.3,  0.0]   # 9 mild back on legs (reordenada)
+  # 9-12) corrección de torso (anti-fall)
+  # idea: si el torso cae hacia atrás, normalmente ayuda:
+  # - meter cadera para "traer" el torso encima del apoyo
+  # - usar tobillo para no colapsar
+  - [ 0.45, 0.10, -0.20, 0.45, 0.10, -0.20]  # lean-forward correction (moderate)
+  - [ 0.70, 0.15, -0.30, 0.70, 0.15, -0.30]  # lean-forward correction (strong)
+  - [-0.35,-0.10, 0.20, -0.35,-0.10, 0.20]   # lean-back correction (moderate)
+  - [-0.55,-0.15, 0.30, -0.55,-0.15, 0.30]   # lean-back correction (strong)
+
+  # 13-16) gait en dos fases (derecha avanza / izquierda avanza)
+  # fase A: derecha swing (thigh/leg/foot) + izquierda stance (más rígida)
+  - [-0.55,  0.85, -0.25,  0.25, -0.35,  0.10]  # gait A (R swing / L stance)
+  - [-0.75,  1.00, -0.35,  0.35, -0.45,  0.15]  # gait A strong
+  # fase B: izquierda swing + derecha stance (simétrica)
+  - [ 0.25, -0.35,  0.10, -0.55,  0.85, -0.25]  # gait B (L swing / R stance)
+  - [ 0.35, -0.45,  0.15, -0.75,  1.00, -0.35]  # gait B strong
 
 
 
@@ -64,11 +79,11 @@ env:
 #   grad_clip_norm: 10.0
 
 train:
-  total_steps: 80000
-  learning_starts: 20000
+  total_steps: 20_000_000
+  learning_starts: 20_000
   train_freq: 4
   batch_size: 32
-  buffer_size: 200000
+  buffer_size: 200_000
   gamma: 0.99
   lr: 1.0e-4
   target_update_freq: 8000
@@ -81,16 +96,16 @@ exploration:
 
 eval:
   # every_steps: 20000
-  every_steps: 19000
+  every_steps: 200_000
   episodes: 5
 
 logging:
   render_every: 10
   run_dir: "runs"
   ckpt_dir: "checkpoints"
-  log_every: 10000
+  log_every: 200000
 
 stabilizer:
-  initial_intensity: 100.0
+  initial_intensity: 0.0 #10.5
   decay: 0.1
-  ref_height: 0.85
+  ref_height: 0.95

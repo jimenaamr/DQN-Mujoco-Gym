@@ -1,3 +1,5 @@
+# src/DQN_walker2d/env.py
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -55,12 +57,10 @@ class PixelObservationWrapper(gym.Wrapper):
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
         _obs, reward, terminated, truncated, info = self.env.step(action=action)
 
-        # Make term/trunc visible upstream for debugging and logging.
         info = dict(info)
         info["terminated"] = bool(terminated)
         info["truncated"] = bool(truncated)
 
-        # If TimeLimit wrapper added its conventional key, preserve it explicitly.
         if "TimeLimit.truncated" in info:
             info["time_limit_truncated"] = bool(info["TimeLimit.truncated"])
 
