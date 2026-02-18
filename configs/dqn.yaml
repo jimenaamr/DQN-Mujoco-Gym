@@ -6,30 +6,65 @@ env:
   frame_stack: 4
   action_repeat: 4
   time_limit: 1000
+
+  
   # Acciones discretas (prototipos) -> lista de vectores en [-1,1] del tamaño de action_dim (continuous)
   # Ajusta esto según el entorno (action_dim lo puedes imprimir con env.action_space.shape)
   action_prototypes:
-  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop / stabilize
+  # - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop / stabilize
 
-  # Fase A / B (marcha) — amplitud media
-  - [ 0.4,  0.8, -0.4, -0.8,  0.2,  0.4]   # 1 gait A
-  - [-0.4, -0.8,  0.4,  0.8, -0.2, -0.4]   # 2 gait B
+  # # Fase A / B (marcha) — amplitud media
+  # - [ 0.4,  0.8, -0.4, -0.8,  0.2,  0.4]   # 1 gait A
+  # - [-0.4, -0.8,  0.4,  0.8, -0.2, -0.4]   # 2 gait B
 
-  # Fase A / B — un poco más fuerte
-  - [ 0.6,  1.0, -0.6, -1.0,  0.3,  0.6]   # 3 gait A strong
-  - [-0.6, -1.0,  0.6,  1.0, -0.3, -0.6]   # 4 gait B strong
+  # # Fase A / B — un poco más fuerte
+  # - [ 0.6,  1.0, -0.6, -1.0,  0.3,  0.6]   # 3 gait A strong
+  # - [-0.6, -1.0,  0.6,  1.0, -0.3, -0.6]   # 4 gait B strong
 
-  # Empujes más “simples” (hip/knee-ish)
-  - [ 0.6,  0.0, -0.6,  0.0,  0.0,  0.0]   # 5 hips alternate
-  - [ 0.0,  0.6,  0.0, -0.6,  0.0,  0.0]   # 6 knees alternate
-  - [ 0.0,  0.0,  0.0,  0.0,  0.4, -0.4]   # 7 ankles stabilize-ish
+  # # Empujes más “simples” (hip/knee-ish)
+  # - [ 0.6,  0.0, -0.6,  0.0,  0.0,  0.0]   # 5 hips alternate
+  # - [ 0.0,  0.6,  0.0, -0.6,  0.0,  0.0]   # 6 knees alternate
+  # - [ 0.0,  0.0,  0.0,  0.0,  0.4, -0.4]   # 7 ankles stabilize-ish
 
-  # Frenos / correcciones
-  - [-0.3,  0.0, -0.3,  0.0,  0.0,  0.0]   # 8 mild back on hips
-  - [ 0.0, -0.3,  0.0, -0.3,  0.0,  0.0]   # 9 mild back on knees
+  # # Frenos / correcciones
+  # - [-0.3,  0.0, -0.3,  0.0,  0.0,  0.0]   # 8 mild back on hips
+  # - [ 0.0, -0.3,  0.0, -0.3,  0.0,  0.0]   # 9 mild back on knees
+
+
+  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop
+
+  # gait A / B (media)
+  - [-0.4, -0.8,  0.4,  0.4,  0.8,  0.2]   # 1 gait A (reordenada)
+  - [ 0.4,  0.8, -0.4, -0.4, -0.8, -0.2]   # 2 gait B (reordenada)
+
+  # gait A / B (fuerte)
+  - [-0.6, -1.0,  0.6,  0.6,  1.0,  0.3]   # 3 gait A strong (reordenada)
+  - [ 0.6,  1.0, -0.6, -0.6, -1.0, -0.3]   # 4 gait B strong (reordenada)
+
+  # empujes simples
+  - [-0.6,  0.0,  0.0,  0.6,  0.0,  0.0]   # 5 thighs alternate (reordenada)
+  - [ 0.0, -0.6,  0.0,  0.0,  0.6,  0.0]   # 6 legs alternate (reordenada)
+  - [ 0.0,  0.0, -0.4,  0.0,  0.0,  0.4]   # 7 feet stabilize-ish (reordenada)
+
+  # frenos
+  - [-0.3,  0.0,  0.0, -0.3,  0.0,  0.0]   # 8 mild back on thighs (reordenada)
+  - [ 0.0, -0.3,  0.0,  0.0, -0.3,  0.0]   # 9 mild back on legs (reordenada)
+
+
+
+# train:
+#   total_steps: 800000
+#   learning_starts: 20000
+#   train_freq: 4
+#   batch_size: 32
+#   buffer_size: 200000
+#   gamma: 0.99
+#   lr: 1.0e-4
+#   target_update_freq: 8000
+#   grad_clip_norm: 10.0
 
 train:
-  total_steps: 800000
+  total_steps: 80000
   learning_starts: 20000
   train_freq: 4
   batch_size: 32
@@ -45,10 +80,16 @@ exploration:
   eps_decay_steps: 300000
 
 eval:
-  every_steps: 20000
+  # every_steps: 20000
+  every_steps: 19000
   episodes: 5
 
 logging:
   run_dir: "runs"
   ckpt_dir: "checkpoints"
-  log_every: 1000
+  log_every: 10000
+
+stabilizer:
+  initial_intensity: 1.0
+  decay: 0.1
+  ref_height: 0.85

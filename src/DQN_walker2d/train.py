@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
-import time
+
+os.environ.setdefault(key="MUJOCO_GL", value="egl")
+
 from argparse import Namespace
 from datetime import datetime
 from typing import Any
@@ -12,8 +14,13 @@ import yaml
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
-from src.dqn import DQNAgent, DQNConfig
-from src.env import DiscreteActionWrapper, EnvSpec, FrameStack, make_env
+from src.DQN_walker2d.dqn import DQNAgent, DQNConfig
+from src.DQN_walker2d.env import (
+    EnvSpec,
+    make_env,
+    make_eval_env,
+)
+from src.DQN_walker2d.helper import StabilizerConfig, stabilizer_config_from_yaml
 
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -29,6 +36,18 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         action_repeat=int(e["action_repeat"]),
         time_limit=int(e["time_limit"]),
         action_prototypes=e["action_prototypes"],
+    )
+
+
+def to_stabilizer_cfg(cfg: dict[str, Any]) -> StabilizerConfig | None:
+    s_raw: Any = cfg.get("stabilizer")
+    if s_raw is None:
+        return None
+    s: dict[str, Any] = dict(s_raw)
+    return StabilizerConfig(
+        initial_intensity=float(s["initial_intensity"]),
+        decay=float(s["decay"]),
+        ref_height=float(s["ref_height"]),
     )
 
 
@@ -68,13 +87,21 @@ def evaluate(agent: DQNAgent, env, episodes: int) -> float:
 
 
 def main(config_path: str) -> None:
+
     cfg = load_yaml(path=config_path)
     seed = int(cfg["seed"])
 
     env_spec: EnvSpec = to_env_spec(cfg=cfg)
-    train_env: FrameStack | DiscreteActionWrapper = make_env(spec=env_spec, seed=seed)
-    eval_env: FrameStack | DiscreteActionWrapper = make_env(
-        spec=env_spec, seed=seed + 123
+    # train_env: FrameStack | DiscreteActionWrapper = make_env(spec=env_spec, seed=seed)
+    # eval_env: FrameStack | DiscreteActionWrapper = make_env(
+    #     spec=env_spec, seed=seed + 123
+    # )
+
+    stabilizer_cfg: StabilizerConfig | None = stabilizer_config_from_yaml(cfg=cfg)
+    train_env = make_env(
+        spec=env_spec,
+        seed=seed,
+        stabilizer=stabilizer_cfg,
     )
 
     obs_shape: tuple[int, ...] | None = (
@@ -90,8 +117,10 @@ def main(config_path: str) -> None:
     os.makedirs(name=run_dir, exist_ok=True)
     os.makedirs(name=ckpt_dir, exist_ok=True)
 
-    run_name: str = f"{env_spec.env_id}_seed{seed}_{int(time.time())}"
-
+    # run_name: str = f"{env_spec.env_id}_seed{seed}_{int(time.time())}"
+    run_name: str = (
+        f"{env_spec.env_id}_{datetime.now().strftime(format='%Y%m%d_%H%M%S')}"
+    )
     run_path: str = os.path.join(run_dir, run_name)
     ckpt_path: str = os.path.join(ckpt_dir, run_name)
 
@@ -152,25 +181,41 @@ def main(config_path: str) -> None:
             ep_len = 0
 
         if (step > 0) and (step % eval_every == 0):
-            eval_ret: float = evaluate(
-                agent=agent, env=eval_env, episodes=eval_episodes
+            video_dir: str = os.path.join("videos", run_name, f"step_{step}")
+
+            eval_env = make_eval_env(
+                spec=env_spec,
+                seed=seed + 123,
+                video_dir=video_dir,
             )
+            try:
+                eval_ret: float = evaluate(
+                    agent=agent,
+                    env=eval_env,
+                    episodes=eval_episodes,
+                )
+            finally:
+                eval_env.close()
+
             writer.add_scalar(
-                tag="eval/return_mean", scalar_value=eval_ret, global_step=step
+                tag="eval/return_mean",
+                scalar_value=eval_ret,
+                global_step=step,
             )
 
-            timestamp = datetime.now().strftime(format="%H-%M-%S")
+            timestamp: str = datetime.now().strftime(format="%H-%M-%S")
             ckpt_file: str = os.path.join(ckpt_path, f"step_{step}_{timestamp}.pt")
             agent.save(path=ckpt_file)
 
             if eval_ret > best_eval:
                 best_eval = eval_ret
-                timestamp: str = datetime.now().strftime(format="%H-%M-%S")
+                timestamp = datetime.now().strftime(format="%H-%M-%S")
                 agent.save(path=os.path.join(ckpt_path, f"best_{timestamp}.pt"))
 
-    writer.close()
+            eval_env.close()
+            writer.close()
+
     train_env.close()
-    eval_env.close()
 
 
 if __name__ == "__main__":

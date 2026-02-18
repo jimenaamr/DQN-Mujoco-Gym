@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import SupportsFloat
 
@@ -8,6 +9,9 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
+
+from src.DQN_walker2d.helper import HeadStabilizerWrapper, StabilizerConfig
+from src.DQN_walker2d.reward import walker2d_default_reward
 
 
 @dataclass
@@ -121,17 +125,86 @@ class ActionRepeat(gym.Wrapper):
         return obs, total_reward, terminated, truncated, info
 
 
-class DiscreteActionWrapper(gym.ActionWrapper):
-    def __init__(self, env: gym.Env, prototypes: np.ndarray) -> None:
+# class DiscreteActionWrapper(gym.ActionWrapper):
+#     def __init__(self, env: gym.Env, prototypes: np.ndarray) -> None:
+#         super().__init__(env=env)
+#         self.prototypes: np.ndarray = prototypes.astype(dtype=np.float32)
+#         self.action_space: spaces.Discrete = spaces.Discrete(n=len(prototypes))
+
+#     def action(self, act: int) -> np.ndarray:
+#         return self.prototypes[int(act)]
+
+
+RewardFn = Callable[
+    [np.ndarray, int, np.ndarray, bool, bool, dict, float, gym.Env],
+    float,
+]
+
+
+class DiscreteActionWrapper(gym.Wrapper):
+    """Map discrete actions to continuous prototypes and optionally override reward."""
+
+    def __init__(
+        self,
+        env: gym.Env,
+        prototypes: np.ndarray,
+        reward_fn: RewardFn | None = None,
+    ) -> None:
         super().__init__(env=env)
+
         self.prototypes: np.ndarray = prototypes.astype(dtype=np.float32)
-        self.action_space: spaces.Discrete = spaces.Discrete(n=len(prototypes))
+        self.action_space: spaces.Discrete = spaces.Discrete(n=len(self.prototypes))
 
-    def action(self, act: int) -> np.ndarray:
-        return self.prototypes[int(act)]
+        self._reward_fn: RewardFn | None = reward_fn
+        self._last_obs: np.ndarray | None = None
+
+    def reset(self, **kwargs) -> tuple[np.ndarray, dict]:
+        obs: np.ndarray
+        info: dict
+        obs, info = self.env.reset(**kwargs)
+        self._last_obs = obs
+        return obs, info
+
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
+        if self._last_obs is None:
+            raise RuntimeError("reset() must be called before step().")
+
+        cont_action: np.ndarray = self.prototypes[int(action)]
+
+        next_obs: np.ndarray
+        env_reward: float
+        terminated: bool
+        truncated: bool
+        info: dict
+        next_obs, env_reward, terminated, truncated, info = self.env.step(
+            action=cont_action
+        )
+
+        if self._reward_fn is None:
+            self._last_obs = next_obs
+            return next_obs, float(env_reward), bool(terminated), bool(truncated), info
+
+        new_reward: float = float(
+            self._reward_fn(
+                self._last_obs,
+                int(action),
+                next_obs,
+                bool(terminated),
+                bool(truncated),
+                info,
+                float(env_reward),
+                self.env,
+            )
+        )
+
+        self._last_obs = next_obs
+        return next_obs, new_reward, bool(terminated), bool(truncated), info
 
 
-def make_env(spec: EnvSpec, seed: int) -> gym.Env:
+# def make_env(spec: EnvSpec, seed: int) -> gym.Env:
+def make_env(
+    spec: EnvSpec, seed: int, stabilizer: StabilizerConfig | None = None
+) -> gym.Env:
     # Only request a render_mode if we will actually call env.render().
     render_mode: str | None = "rgb_array" if spec.use_pixels else None
     env: gym.Env = gym.make(id=spec.env_id, render_mode=render_mode)
@@ -153,7 +226,25 @@ def make_env(spec: EnvSpec, seed: int) -> gym.Env:
             f"got {prototypes.shape[1]} but env action dim is {cont_dim}"
         )
 
-    env = DiscreteActionWrapper(env=env, prototypes=prototypes)
+    # env = DiscreteActionWrapper(
+    #     env=env,
+    #     prototypes=prototypes,
+    #     reward_fn=walker2d_default_reward,
+    # )
+
+    # if spec.frame_stack > 1 and spec.use_pixels:
+    #     env = FrameStack(env=env, k=spec.frame_stack)
+
+    # return env
+
+    env = DiscreteActionWrapper(
+        env=env,
+        prototypes=prototypes,
+        reward_fn=walker2d_default_reward,
+    )
+
+    if stabilizer is not None:
+        env = HeadStabilizerWrapper(env=env, cfg=stabilizer)
 
     if spec.frame_stack > 1 and spec.use_pixels:
         env = FrameStack(env=env, k=spec.frame_stack)

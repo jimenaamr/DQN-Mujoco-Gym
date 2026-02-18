@@ -15,8 +15,10 @@ venv/
 # Logs y runs
 runs/*
 checkpoints/*
+videos/*
 !runs/.gitkeep
 !checkpoints/.gitkeep
+!videos/.gitkeep
 
 # TensorBoard
 events.out.tfevents.*

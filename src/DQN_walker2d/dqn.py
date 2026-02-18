@@ -85,16 +85,13 @@ class ReplayBuffer:
             low=0, high=max_n, size=batch_size
         )
 
-        obs: Tensor = (
-            torch.from_numpy(ndarray=self.obs[idxs]).float().to(device=device) / 255.0
-        )
+        obs: Tensor = torch.from_numpy(self.obs[idxs]).float().to(device=device) / 255.0
         next_obs: Tensor = (
-            torch.from_numpy(ndarray=self.next_obs[idxs]).float().to(device=device)
-            / 255.0
+            torch.from_numpy(self.next_obs[idxs]).float().to(device=device) / 255.0
         )
-        actions: Tensor = torch.from_numpy(ndarray=self.actions[idxs]).to(device=device)
-        rewards: Tensor = torch.from_numpy(ndarray=self.rewards[idxs]).to(device=device)
-        dones: Tensor = torch.from_numpy(ndarray=self.dones[idxs]).to(device=device)
+        actions: Tensor = torch.from_numpy(self.actions[idxs]).to(device=device)
+        rewards: Tensor = torch.from_numpy(self.rewards[idxs]).to(device=device)
+        dones: Tensor = torch.from_numpy(self.dones[idxs]).to(device=device)
 
         return obs, actions, rewards, next_obs, dones
 
@@ -168,11 +165,7 @@ class DQNAgent:
             return int(np.random.randint(low=0, high=self.n_actions))
 
         x: Tensor = (
-            torch
-            .from_numpy(ndarray=obs)
-            .float()
-            .to(device=self.device)
-            .unsqueeze(dim=0)
+            torch.from_numpy(obs).float().to(device=self.device).unsqueeze(dim=0)
             / 255.0
         )
         q = self.q(x)
