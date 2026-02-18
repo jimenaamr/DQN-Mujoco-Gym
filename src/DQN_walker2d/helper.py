@@ -8,6 +8,8 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 
+from src.DQN_walker2d.monitoring import MONITOR
+
 
 @dataclass(frozen=True)
 class StabilizerConfig:
@@ -79,6 +81,7 @@ class HeadStabilizerWrapper(gym.Wrapper):
         head_pos: np.ndarray = np.asarray(
             self._data.xpos[self._head_id], dtype=np.float64
         )
+
         self._initial_head_z = float(head_pos[2])
         self._forward_accum = 0.0
 
@@ -142,6 +145,22 @@ class HeadStabilizerWrapper(gym.Wrapper):
 
         self._data.xfrc_applied[self._head_id, :3] = diff.astype(np.float64)
 
+        # obs: np.ndarray
+        # reward: float
+        # terminated: bool
+        # truncated: bool
+        # info: dict[str, Any]
+        # obs, reward, terminated, truncated, info = self.env.step(action)
+
+        # forward_inc: float = float(info.get("reward_forward", 0.0))
+        # self._forward_accum += forward_inc
+
+        # denom: float = float(alpha + self._beta)
+        # if denom > 0.0:
+        #     reward = float(reward) * (float(self._beta) / denom)
+
+        # return obs, float(reward), bool(terminated), bool(truncated), info
+
         obs: np.ndarray
         reward: float
         terminated: bool
@@ -153,10 +172,22 @@ class HeadStabilizerWrapper(gym.Wrapper):
         self._forward_accum += forward_inc
 
         denom: float = float(alpha + self._beta)
-        if denom > 0.0:
-            reward = float(reward) * (float(self._beta) / denom)
+        agent_contrib: float = float(self._beta / denom) if denom > 0.0 else 0.0
 
-        return obs, float(reward), bool(terminated), bool(truncated), info
+        real_reward: float = float(reward) * agent_contrib
+
+        # ---------- monitoring ----------
+        MONITOR.set_raw_reward(float(reward))
+        MONITOR.set_head_height(head_z)
+        MONITOR.set_acc_fw_reward(self._forward_accum)
+        MONITOR.set_helper_intensity(
+            target_mag / base_gravity_force if base_gravity_force > 0 else 0.0
+        )
+        MONITOR.set_agent_contrib(agent_contrib)
+        MONITOR.set_real_reward(real_reward)
+        # --------------------------------
+
+        return obs, real_reward, bool(terminated), bool(truncated), info
 
 
 def _resolve_body_id(

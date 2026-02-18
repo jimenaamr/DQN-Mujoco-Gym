@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import SupportsFloat
 
 import cv2
 import gymnasium as gym
@@ -21,7 +20,7 @@ class EnvSpec:
     action_repeat: int
     time_limit: int
     action_prototypes: list[list[float]]
-    use_pixels: bool = True  # NEW: allow disabling pixels for training
+    use_pixels: bool = True
 
 
 class PixelObservationWrapper(gym.Wrapper):
@@ -40,7 +39,7 @@ class PixelObservationWrapper(gym.Wrapper):
         )
 
     def _get_obs(self) -> np.ndarray:
-        frame: np.ndarray = self.env.render()  # (H, W, 3)
+        frame: np.ndarray = self.env.render()
         frame = cv2.resize(
             src=frame,
             dsize=(self.width, self.height),
@@ -54,10 +53,17 @@ class PixelObservationWrapper(gym.Wrapper):
         return self._get_obs(), info
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
-        reward: float
-        terminated: bool
-        truncated: bool
         _obs, reward, terminated, truncated, info = self.env.step(action=action)
+
+        # Make term/trunc visible upstream for debugging and logging.
+        info = dict(info)
+        info["terminated"] = bool(terminated)
+        info["truncated"] = bool(truncated)
+
+        # If TimeLimit wrapper added its conventional key, preserve it explicitly.
+        if "TimeLimit.truncated" in info:
+            info["time_limit_truncated"] = bool(info["TimeLimit.truncated"])
+
         return self._get_obs(), float(reward), bool(terminated), bool(truncated), info
 
 
@@ -67,14 +73,11 @@ class FrameStack(gym.Wrapper):
         self.k: int = int(k)
         self.frames: list[np.ndarray] | None = None
 
-        c: int
-        h: int
-        w: int
         c, h, w = env.observation_space.shape
         self.observation_space: spaces.Box = spaces.Box(
             low=0,
             high=255,
-            shape=(c * self.k, h, w),
+            shape=(int(c) * self.k, int(h), int(w)),
             dtype=np.uint8,
         )
 
@@ -84,9 +87,6 @@ class FrameStack(gym.Wrapper):
         return self._get_obs(), info
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
-        reward: float
-        terminated: bool
-        truncated: bool
         obs, reward, terminated, truncated, info = self.env.step(action=action)
         assert self.frames is not None
         self.frames.pop(0)
@@ -111,9 +111,6 @@ class ActionRepeat(gym.Wrapper):
         obs: np.ndarray | None = None
 
         for _ in range(self.repeat):
-            r: SupportsFloat
-            term: bool
-            trunc: bool
             obs, r, term, trunc, info = self.env.step(action=action)
             total_reward += float(r)
             terminated = terminated or bool(term)
@@ -122,17 +119,9 @@ class ActionRepeat(gym.Wrapper):
                 break
 
         assert obs is not None
-        return obs, total_reward, terminated, truncated, info
-
-
-# class DiscreteActionWrapper(gym.ActionWrapper):
-#     def __init__(self, env: gym.Env, prototypes: np.ndarray) -> None:
-#         super().__init__(env=env)
-#         self.prototypes: np.ndarray = prototypes.astype(dtype=np.float32)
-#         self.action_space: spaces.Discrete = spaces.Discrete(n=len(prototypes))
-
-#     def action(self, act: int) -> np.ndarray:
-#         return self.prototypes[int(act)]
+        info = dict(info)
+        info["action_repeat"] = int(self.repeat)
+        return obs, float(total_reward), bool(terminated), bool(truncated), info
 
 
 RewardFn = Callable[
@@ -159,8 +148,6 @@ class DiscreteActionWrapper(gym.Wrapper):
         self._last_obs: np.ndarray | None = None
 
     def reset(self, **kwargs) -> tuple[np.ndarray, dict]:
-        obs: np.ndarray
-        info: dict
         obs, info = self.env.reset(**kwargs)
         self._last_obs = obs
         return obs, info
@@ -171,11 +158,6 @@ class DiscreteActionWrapper(gym.Wrapper):
 
         cont_action: np.ndarray = self.prototypes[int(action)]
 
-        next_obs: np.ndarray
-        env_reward: float
-        terminated: bool
-        truncated: bool
-        info: dict
         next_obs, env_reward, terminated, truncated, info = self.env.step(
             action=cont_action
         )
@@ -198,14 +180,12 @@ class DiscreteActionWrapper(gym.Wrapper):
         )
 
         self._last_obs = next_obs
-        return next_obs, new_reward, bool(terminated), bool(truncated), info
+        return next_obs, float(new_reward), bool(terminated), bool(truncated), info
 
 
-# def make_env(spec: EnvSpec, seed: int) -> gym.Env:
 def make_env(
     spec: EnvSpec, seed: int, stabilizer: StabilizerConfig | None = None
 ) -> gym.Env:
-    # Only request a render_mode if we will actually call env.render().
     render_mode: str | None = "rgb_array" if spec.use_pixels else None
     env: gym.Env = gym.make(id=spec.env_id, render_mode=render_mode)
 
@@ -226,17 +206,6 @@ def make_env(
             f"got {prototypes.shape[1]} but env action dim is {cont_dim}"
         )
 
-    # env = DiscreteActionWrapper(
-    #     env=env,
-    #     prototypes=prototypes,
-    #     reward_fn=walker2d_default_reward,
-    # )
-
-    # if spec.frame_stack > 1 and spec.use_pixels:
-    #     env = FrameStack(env=env, k=spec.frame_stack)
-
-    # return env
-
     env = DiscreteActionWrapper(
         env=env,
         prototypes=prototypes,
@@ -253,7 +222,6 @@ def make_env(
 
 
 def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
-    # For video/pixels we do need rgb_array.
     env: gym.Env = gym.make(id=spec.env_id, render_mode="rgb_array")
     env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
     env.reset(seed=int(seed))
