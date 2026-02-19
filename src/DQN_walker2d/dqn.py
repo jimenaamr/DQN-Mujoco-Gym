@@ -192,7 +192,6 @@ def _compile_module(m: nn.Module) -> nn.Module:
     compile_fn: Any = getattr(torch, "compile", None)
     if compile_fn is None:
         return m
-    print(f"compile {m.__class__.__name__}")
 
     return compile_fn(
         m,
