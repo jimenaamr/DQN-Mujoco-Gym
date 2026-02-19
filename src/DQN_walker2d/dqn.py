@@ -265,39 +265,60 @@ class DQNAgent:
         return {"loss": float(loss.detach().cpu().item())}
 
     def save(self, path: str) -> None:
-        """Save agent parameters to disk.
+        """Save agent parameters and training state to disk.
 
         Args:
             path: Output checkpoint path.
         """
         payload: dict[str, Any] = {
+            "q": self.q.state_dict(),
+            "q_target": self.q_target.state_dict(),
+            "opt": self.opt.state_dict(),
+            "global_step": int(self.global_step),
+            "cfg": dict(self.cfg.__dict__),
+            # Backward-compat keys (optional):
             "q_state": self.q.state_dict(),
             "q_target_state": self.q_target.state_dict(),
             "opt_state": self.opt.state_dict(),
-            "cfg": self.cfg.__dict__,
         }
         torch.save(obj=payload, f=str(path))
 
-    def load(self, path: str) -> None:
-        """Load agent weights and optimizer state from a checkpoint."""
-        ckpt: dict[str, Any] = torch.load(path, map_location=self.device)
+    def load(self, path: str) -> int:
+        """Load agent weights and optimizer state from a checkpoint.
+
+        Args:
+            path: Checkpoint path.
+
+        Returns:
+            The loaded global step (0 if not present).
+        """
+        ckpt: dict[str, Any] = torch.load(f=str(path), map_location=self.device)
 
         q_state: dict[str, Any] | None = ckpt.get("q")
         if q_state is None:
             q_state = ckpt.get("q_state")
-
         if q_state is None:
-            raise KeyError(f"Checkpoint missing Q state. Keys: {list(ckpt.keys())}")
-
-        self.q.load_state_dict(q_state)
+            raise KeyError(
+                f"Checkpoint missing Q state. Keys: {sorted(list(ckpt.keys()))}"
+            )
+        self.q.load_state_dict(state_dict=q_state)
 
         q_target_state: dict[str, Any] | None = ckpt.get("q_target")
-        if q_target_state is not None and hasattr(self, "q_target"):
-            self.q_target.load_state_dict(q_target_state)
+        if q_target_state is None:
+            q_target_state = ckpt.get("q_target_state")
+        if q_target_state is not None:
+            self.q_target.load_state_dict(state_dict=q_target_state)
 
         opt_state: dict[str, Any] | None = ckpt.get("opt")
-        if opt_state is not None and hasattr(self, "optimizer"):
-            self.optimizer.load_state_dict(opt_state)
+        if opt_state is None:
+            opt_state = ckpt.get("opt_state")
+        if opt_state is not None:
+            self.opt.load_state_dict(state_dict=opt_state)
+
+        loaded_step_any: Any = ckpt.get("global_step", 0)
+        loaded_step: int = int(loaded_step_any) if loaded_step_any is not None else 0
+        self.global_step = int(loaded_step)
+        return int(loaded_step)
 
 
 def _linear_epsilon(

@@ -13,27 +13,6 @@ env:
   # Ajusta esto según el entorno (action_dim lo puedes imprimir con env.action_space.shape)
   action_prototypes:
 
-  # - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]   # 0 noop
-
-  # # gait A / B (media)
-  # - [-0.4, -0.8,  0.4,  0.4,  0.8,  0.2]   # 1 gait A (reordenada)
-  # - [ 0.4,  0.8, -0.4, -0.4, -0.8, -0.2]   # 2 gait B (reordenada)
-
-  # # gait A / B (fuerte)
-  # - [-0.6, -1.0,  0.6,  0.6,  1.0,  0.3]   # 3 gait A strong (reordenada)
-  # - [ 0.6,  1.0, -0.6, -0.6, -1.0, -0.3]   # 4 gait B strong (reordenada)
-
-  # # empujes simples
-  # - [-0.6,  0.0,  0.0,  0.6,  0.0,  0.0]   # 5 thighs alternate (reordenada)
-  # - [ 0.0, -0.6,  0.0,  0.0,  0.6,  0.0]   # 6 legs alternate (reordenada)
-  # - [ 0.0,  0.0, -0.4,  0.0,  0.0,  0.4]   # 7 feet stabilize-ish (reordenada)
-
-  # # frenos
-  # - [-0.3,  0.0,  0.0, -0.3,  0.0,  0.0]   # 8 mild back on thighs (reordenada)
-  # - [ 0.0, -0.3,  0.0,  0.0, -0.3,  0.0]   # 9 mild back on legs (reordenada)
-
-
-
   # 0) noop
   - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]
 

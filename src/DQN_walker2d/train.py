@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import tempfile
 from argparse import Namespace
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -25,6 +27,8 @@ from src.DQN_walker2d.helper import (
 from src.DQN_walker2d.monitoring import MONITOR
 
 os.environ.setdefault(key="MUJOCO_GL", value="egl")
+
+_STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -181,11 +185,91 @@ def _format_legend_text() -> str:
     )
 
 
-def main(config_path: str) -> None:
+def _select_latest_checkpoint(ckpt_dir: Path) -> Path | None:
+    """Select the latest checkpoint inside a directory.
+
+    Preference order:
+        1) Largest step_XXXX_*.pt by XXXX.
+        2) Most recently modified best_*.pt.
+
+    Args:
+        ckpt_dir: Directory containing checkpoint files.
+
+    Returns:
+        Path to selected checkpoint, or None if no checkpoints exist.
+    """
+    if not ckpt_dir.exists() or not ckpt_dir.is_dir():
+        return None
+
+    step_files: list[tuple[int, Path]] = []
+    best_files: list[Path] = []
+
+    for p in ckpt_dir.iterdir():
+        if not p.is_file():
+            continue
+        if p.suffix != ".pt":
+            continue
+
+        m: re.Match[str] | None = _STEP_RE.match(p.name)
+        if m is not None:
+            step_files.append((int(m.group(1)), p))
+        elif p.name.startswith("best_"):
+            best_files.append(p)
+
+    if step_files:
+        step_files.sort(key=lambda t: t[0])
+        return step_files[-1][1]
+
+    if best_files:
+        best_files.sort(key=lambda p: p.stat().st_mtime)
+        return best_files[-1]
+
+    return None
+
+
+def resolve_resume_path(resume: str | None) -> Path | None:
+    """Resolve a resume argument into a concrete checkpoint file path.
+
+    Args:
+        resume: Either a checkpoint file path, a directory path, or None.
+
+    Returns:
+        A checkpoint file path, or None if resume is None / invalid / empty.
+    """
+    if resume is None:
+        return None
+
+    p: Path = Path(resume).expanduser()
+    if p.is_file():
+        return p
+
+    if p.is_dir():
+        return _select_latest_checkpoint(ckpt_dir=p)
+
+    return None
+
+
+def _infer_run_name_from_checkpoint(ckpt_file: Path) -> str | None:
+    """Infer run name from a checkpoint path: checkpoints/<run_name>/<file>.pt.
+
+    Args:
+        ckpt_file: Checkpoint file path.
+
+    Returns:
+        run_name if pattern matches, else None.
+    """
+    parent: Path = ckpt_file.parent
+    if parent.name == "":
+        return None
+    return str(parent.name)
+
+
+def main(config_path: str, resume_path: str | None = None) -> None:
     """Entry point for training.
 
     Args:
         config_path: Path to YAML config file.
+        resume_path: Optional checkpoint file or directory to resume from.
     """
     cfg: dict[str, Any] = load_yaml(path=config_path)
     seed: int = int(cfg["seed"])
@@ -221,9 +305,19 @@ def main(config_path: str) -> None:
     os.makedirs(name=run_dir, exist_ok=True)
     os.makedirs(name=ckpt_dir, exist_ok=True)
 
-    run_name: str = (
-        f"{env_spec.env_id}_{datetime.now().strftime(format='%Y%m%d_%H%M%S')}"
-    )
+    resume_ckpt: Path | None = resolve_resume_path(resume=resume_path)
+
+    if resume_ckpt is not None:
+        inferred: str | None = _infer_run_name_from_checkpoint(ckpt_file=resume_ckpt)
+        run_name: str = inferred or (
+            f"{env_spec.env_id}_resume_"
+            f"{datetime.now().strftime(format='%Y%m%d_%H%M%S')}"
+        )
+    else:
+        run_name = (
+            f"{env_spec.env_id}_{datetime.now().strftime(format='%Y%m%d_%H%M%S')}"
+        )
+
     run_path: str = os.path.join(run_dir, run_name)
     ckpt_path: str = os.path.join(ckpt_dir, run_name)
     os.makedirs(name=run_path, exist_ok=True)
@@ -252,6 +346,14 @@ def main(config_path: str) -> None:
     )
     viewer.start()
 
+    start_step: int = 0
+    if resume_ckpt is not None:
+        start_step = int(agent.load(path=str(resume_ckpt)))
+        print(
+            f"[train] Resuming from: {resume_ckpt} (start_step={start_step})",
+            flush=True,
+        )
+
     obs, _ = train_env.reset()
     ep_ret: float = 0.0
     ep_len: int = 0
@@ -264,7 +366,7 @@ def main(config_path: str) -> None:
         episode_idx: int = 0
         MONITOR.set_episode(episode_idx)
 
-        for step in trange(total_steps, desc="train"):
+        for step in trange(start_step, total_steps, desc="train"):
             agent.global_step = int(step)
 
             if (render_every > 0) and ((step % render_every) == 0):
@@ -372,5 +474,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/dqn.yaml")
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Checkpoint .pt file or directory to resume from (default: None).",
+    )
     args: Namespace = parser.parse_args()
-    main(config_path=str(args.config))
+    main(config_path=str(args.config), resume_path=args.resume)
