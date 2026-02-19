@@ -237,7 +237,11 @@ def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
     env = PixelObservationWrapper(env=env)
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)
-    env = DiscreteActionWrapper(env=env, prototypes=prototypes)
+    env = DiscreteActionWrapper(
+        env=env,
+        prototypes=prototypes,
+        reward_fn=walker2d_default_reward,
+    )
 
     if spec.frame_stack > 1:
         env = FrameStack(env=env, k=spec.frame_stack)
