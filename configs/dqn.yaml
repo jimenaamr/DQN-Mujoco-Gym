@@ -1,6 +1,6 @@
 seed: 0
-# device: "gpu"   # "cpu" si no tienes
-device: "cpu"   # "cpu" si no tienes
+device: "gpu"   # "cpu" si no tienes
+# device: "cpu"   # "cpu" si no tienes
 
 env:
   env_id: "Walker2d-v5"
@@ -88,7 +88,7 @@ logging:
   render_every: 10
   run_dir: "runs"
   ckpt_dir: "checkpoints"
-  log_every: 200000
+  log_every: 200_000
 
 stabilizer:
   initial_intensity: 0.01 #10.5

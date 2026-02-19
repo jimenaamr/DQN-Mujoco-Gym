@@ -51,21 +51,11 @@ class _QNet(nn.Module):
         w: int
         c, h, w = obs_shape
 
-        # self.conv: nn.Sequential = nn.Sequential(
-        #     nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
-        #     nn.ReLU(inplace=True),
-        #     nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
-        #     nn.ReLU(inplace=True),
-        # )
-
-        self.conv = nn.Sequential(
-            # Aumentamos el stride para reducir drásticamente el mapa de características rápido
+        self.conv: nn.Sequential = nn.Sequential(
             nn.Conv2d(in_channels=c, out_channels=16, kernel_size=8, stride=4),
-            nn.SiLU(inplace=True),
+            nn.SiLU(inplace=False),
             nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2),
-            nn.SiLU(inplace=True),
+            nn.SiLU(inplace=False),
         )
 
         with torch.no_grad():
@@ -78,9 +68,9 @@ class _QNet(nn.Module):
 
         self.head: nn.Sequential = nn.Sequential(
             nn.Linear(in_features=flat_dim, out_features=256),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Linear(in_features=256, out_features=64),
-            nn.ReLU(inplace=True),
+            nn.ReLU(inplace=False),
             nn.Linear(in_features=64, out_features=n_actions),
         )
 
@@ -94,11 +84,10 @@ class _QNet(nn.Module):
             (B, n_actions) Q-values.
         """
         if x.dtype is torch.uint8:
-            x = x.to(dtype=torch.float32).mul_(other=(1.0 / 255.0))
+            x = x.to(dtype=torch.float32).mul(1.0 / 255.0)
         elif x.dtype is not torch.float32:
             x = x.to(dtype=torch.float32)
 
-        # For CUDA, channels_last often speeds up Conv2d without changing numerics.
         if x.is_cuda:
             x = x.contiguous(memory_format=torch.channels_last)
 
@@ -183,6 +172,11 @@ class _ReplayBuffer:
 def _compile_module(m: nn.Module) -> nn.Module:
     """Compile a module with torch.compile when available.
 
+    Notes:
+        torch.compile forbids specifying both `mode` and `options`. We keep the
+        defaults for `mode` and only pass `options` to disable cudagraph capture,
+        which is what triggers the "inference tensor" runtime error.
+
     Args:
         m: Module to compile.
 
@@ -193,11 +187,16 @@ def _compile_module(m: nn.Module) -> nn.Module:
     if compile_fn is None:
         return m
 
+    options: dict[str, Any] = {
+        "triton.cudagraphs": False,
+        "triton.cudagraph_trees": False,
+    }
+
     return compile_fn(
         m,
-        mode="reduce-overhead",
         fullgraph=False,
         dynamic=False,
+        options=options,
     )
 
 
@@ -221,6 +220,7 @@ class DQNAgent:
         self.device: torch.device = torch.device(str(cfg.device))
 
         if self.device.type == "cuda":
+            torch.set_float32_matmul_precision("medium")
             torch.backends.cudnn.benchmark = True
 
         self.n_actions: int = int(n_actions)
@@ -230,7 +230,6 @@ class DQNAgent:
             self.device
         )
 
-        # For CUDA, channels_last can speed up Conv2d without changing behavior.
         if self.device.type == "cuda":
             q = q.to(memory_format=torch.channels_last)
             q_target = q_target.to(memory_format=torch.channels_last)
@@ -239,7 +238,6 @@ class DQNAgent:
         q_target.eval()
         q.train()
 
-        # Always compile when available.
         self.q: nn.Module = _compile_module(m=q)
         self.q_target: nn.Module = _compile_module(m=q_target)
 
@@ -322,7 +320,7 @@ class DQNAgent:
         if (not eval_mode) and (float(np.random.rand()) < eps):
             return int(np.random.randint(low=0, high=self.n_actions))
 
-        with torch.inference_mode():
+        with torch.no_grad():
             x: torch.Tensor = (
                 torch
                 .as_tensor(obs)
@@ -476,7 +474,6 @@ class DQNAgent:
         rewards: torch.Tensor = batch["rewards"]
         dones: torch.Tensor = batch["dones"]
 
-        # Keep input layout consistent with channels_last networks on CUDA.
         if obs.is_cuda:
             obs = obs.contiguous(memory_format=torch.channels_last)
             next_obs = next_obs.contiguous(memory_format=torch.channels_last)
@@ -489,7 +486,10 @@ class DQNAgent:
         )
 
         with torch.no_grad():
-            a_star: torch.Tensor = self.q(next_obs).argmax(dim=1, keepdim=True)  # type: ignore[operator]
+            a_star: torch.Tensor = self.q(next_obs).argmax(  # type: ignore[operator]
+                dim=1,
+                keepdim=True,
+            )
             q_next: torch.Tensor = (
                 self
                 .q_target(next_obs)  # type: ignore[operator]
