@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from math import sqrt
 
 import cv2
 import gymnasium as gym
@@ -53,15 +54,15 @@ def _maybe_body_x(env: gym.Env, body_name: str) -> float | None:
     return x
 
 
-def _maybe_geom_x(env: gym.Env, geom_name: str) -> float | None:
-    """Return geom x-position from MuJoCo if available, else None.
+def _maybe_geom_pos(env: gym.Env, geom_name: str) -> tuple[float, float, float] | None:
+    """Return geom (x,y,z) position from MuJoCo if available, else None.
 
     Args:
         env: Wrapped Gymnasium environment.
         geom_name: MuJoCo geom name.
 
     Returns:
-        X-position of the geom in world coordinates, or None if unavailable.
+        (x, y, z) position of the geom in world coordinates, or None if unavailable.
     """
     base: gym.Env = env.unwrapped
     model = getattr(base, "model", None)
@@ -82,10 +83,14 @@ def _maybe_geom_x(env: gym.Env, geom_name: str) -> float | None:
             return None
 
     try:
-        x: float = float(data.geom_xpos[geom_id][0])
+        pos = data.geom_xpos[geom_id]
+        x: float = float(pos[0])
+        y: float = float(pos[1])
+        z: float = float(pos[2])
     except Exception:
         return None
-    return x
+
+    return (x, y, z)
 
 
 def _first_body_x(env: gym.Env, names: Sequence[str]) -> float | None:
@@ -97,12 +102,17 @@ def _first_body_x(env: gym.Env, names: Sequence[str]) -> float | None:
     return None
 
 
-def _first_geom_x(env: gym.Env, names: Sequence[str]) -> float | None:
-    """Return the first available geom x-position among candidate names."""
+def _first_geom_pos(
+    env: gym.Env, names: Sequence[str]
+) -> tuple[float, float, float] | None:
+    """Return the first available geom position among candidate names."""
     for name in names:
-        x: float | None = _maybe_geom_x(env=env, geom_name=str(name))
-        if x is not None:
-            return float(x)
+        pos: tuple[float, float, float] | None = _maybe_geom_pos(
+            env=env,
+            geom_name=str(name),
+        )
+        if pos is not None:
+            return pos
     return None
 
 
@@ -200,38 +210,69 @@ class PixelObservationWrapper(gym.Wrapper):
             info["time_limit_truncated"] = bool(info["TimeLimit.truncated"])
 
         # Add positions for custom rewards (image observation still used as obs).
-        # NOTE: For feet, geom positions are usually closer to "what you see" than body frames.
         x_hips: float | None = _first_body_x(
-            env=self.env, names=("torso", "hips", "pelvis")
+            env=self.env,
+            names=("torso", "hips", "pelvis"),
         )
 
-        x_foot1: float | None = _first_geom_x(
-            env=self.env,
-            names=(
-                "foot",
-                "right_foot",
-                "foot_right",
-                "foot_geom",
-                "foot_1",
-            ),
+        foot1_geom_candidates: tuple[str, ...] = (
+            "foot",
+            "right_foot",
+            "foot_right",
+            "foot_geom",
+            "foot_1",
         )
-        x_foot2: float | None = _first_geom_x(
+        foot2_geom_candidates: tuple[str, ...] = (
+            "foot_left",
+            "left_foot",
+            "foot_l",
+            "foot_left_geom",
+            "foot_2",
+        )
+
+        foot1_pos: tuple[float, float, float] | None = _first_geom_pos(
             env=self.env,
-            names=(
-                "foot_left",
-                "left_foot",
-                "foot_l",
-                "foot_left_geom",
-                "foot_2",
-            ),
+            names=foot1_geom_candidates,
+        )
+        foot2_pos: tuple[float, float, float] | None = _first_geom_pos(
+            env=self.env,
+            names=foot2_geom_candidates,
         )
 
         if x_hips is not None:
             info["x_hips"] = float(x_hips)
-        if x_foot1 is not None:
-            info["x_foot1"] = float(x_foot1)
-        if x_foot2 is not None:
-            info["x_foot2"] = float(x_foot2)
+
+        if foot1_pos is not None:
+            x1: float = float(foot1_pos[0])
+            y1: float = float(foot1_pos[1])
+            z1: float = float(foot1_pos[2])
+            info["x_foot1"] = x1
+            info["y_foot1"] = y1
+            info["z_foot1"] = z1
+
+        if foot2_pos is not None:
+            x2: float = float(foot2_pos[0])
+            y2: float = float(foot2_pos[1])
+            z2: float = float(foot2_pos[2])
+            info["x_foot2"] = x2
+            info["y_foot2"] = y2
+            info["z_foot2"] = z2
+
+        # Lowest foot height (z) among the two feet.
+        if foot1_pos is not None and foot2_pos is not None:
+            lowest_foot_height: float = float(min(foot1_pos[2], foot2_pos[2]))
+            info["lowest_foot_height"] = lowest_foot_height
+        elif foot1_pos is not None:
+            info["lowest_foot_height"] = float(foot1_pos[2])
+        elif foot2_pos is not None:
+            info["lowest_foot_height"] = float(foot2_pos[2])
+
+        # Feet distance (2D): sqrt((dx)^2 + (dy)^2) in the horizontal plane (x,y).
+        if foot1_pos is not None and foot2_pos is not None:
+            dx: float = float(foot1_pos[0] - foot2_pos[0])
+            dy: float = float(foot1_pos[1] - foot2_pos[1])
+            feet_dist_2d: float = float(sqrt(dx * dx + dy * dy))
+            info["feet_dist_2d"] = feet_dist_2d
 
         return self._get_obs(), float(reward), bool(terminated), bool(truncated), info
 
@@ -364,7 +405,9 @@ def make_env(
         env = ActionRepeat(env=env, repeat=spec.action_repeat)
 
     env = PixelObservationWrapper(
-        env=env, height=int(spec.obs_h), width=int(spec.obs_w)
+        env=env,
+        height=int(spec.obs_h),
+        width=int(spec.obs_w),
     )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)
@@ -404,7 +447,9 @@ def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
     )
 
     env = PixelObservationWrapper(
-        env=env, height=int(spec.obs_h), width=int(spec.obs_w)
+        env=env,
+        height=int(spec.obs_h),
+        width=int(spec.obs_w),
     )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)

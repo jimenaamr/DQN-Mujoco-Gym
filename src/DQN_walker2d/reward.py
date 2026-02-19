@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import gymnasium as gym
 import numpy as np
 
@@ -29,12 +31,23 @@ def walker2d_default_reward(
     x_foot1: float = float(info.get("x_foot1", 0.0))
     x_foot2: float = float(info.get("x_foot2", 0.0))
 
+    feet_dist: float = float(info.get("feet_dist_2d", 0.0))
+
     # assert False
 
     lean_forward: float = x_hips - ((x_foot1 + x_foot2) / 2.0)
+    lowest_foot_height: float = float(info.get("lowest_foot_height", 0.0))
 
     # print(x_hips, x_foot1, x_foot2, lean_forward)
-    # time.sleep(0.5)
+    print(lowest_foot_height, feet_dist)
+    time.sleep(0.5)
 
-    # healthy_reward *= 0.5
-    return healthy_reward + lean_forward + forward_reward - ctrl_cost
+    reward: float = 0.0
+    reward += 0.5 * healthy_reward
+    reward += forward_reward
+    reward += lean_forward
+    reward += lowest_foot_height
+    reward += feet_dist
+    reward -= ctrl_cost
+
+    return reward
