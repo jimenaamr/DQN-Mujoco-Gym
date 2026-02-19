@@ -59,11 +59,11 @@ class _QNet(nn.Module):
         #     nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
         #     nn.ReLU(inplace=True),
         # )
+
         self.conv = nn.Sequential(
             # Aumentamos el stride para reducir drásticamente el mapa de características rápido
             nn.Conv2d(in_channels=c, out_channels=16, kernel_size=8, stride=4),
             nn.SiLU(inplace=True),
-            # Reducimos a 32 filtros (suficiente para Hopper) con un kernel más pequeño
             nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2),
             nn.SiLU(inplace=True),
         )
@@ -77,9 +77,11 @@ class _QNet(nn.Module):
             flat_dim: int = int(out.flatten(start_dim=1).shape[1])
 
         self.head: nn.Sequential = nn.Sequential(
-            nn.Linear(in_features=flat_dim, out_features=512),
+            nn.Linear(in_features=flat_dim, out_features=256),
             nn.ReLU(inplace=True),
-            nn.Linear(in_features=512, out_features=n_actions),
+            nn.Linear(in_features=256, out_features=64),
+            nn.ReLU(inplace=True),
+            nn.Linear(in_features=64, out_features=n_actions),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

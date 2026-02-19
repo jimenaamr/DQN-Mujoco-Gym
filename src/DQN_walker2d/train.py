@@ -155,7 +155,7 @@ def _run_eval_in_subprocess(
         ]
 
         env: dict[str, str] = dict(os.environ)
-        env["CUDA_VISIBLE_DEVICES"] = ""  # eval on CPU only
+        # env["CUDA_VISIBLE_DEVICES"] = ""  # eval on CPU only
         subprocess.run(args=cmd, check=True, env=env)
 
         with open(file=out_path, encoding="utf-8") as f:
