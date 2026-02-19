@@ -41,4 +41,10 @@ def walker2d_default_reward(
     forward_reward: float = float(info.get("reward_forward", 0.0))
     ctrl_cost: float = float(info.get("reward_ctrl", 0.0))
 
+    healthy_reward *= 0.1
+
+    # print(
+    #     f"Healthy reward: {healthy_reward}, Forward reward: {forward_reward}, Control cost: {ctrl_cost}"
+    # )
+    # time.sleep(2)
     return healthy_reward + forward_reward - ctrl_cost

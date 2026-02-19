@@ -5,45 +5,44 @@ device: "cpu"   # "cpu" si no tienes
 env:
   env_id: "Walker2d-v5"
   frame_stack: 4
-  action_repeat: 4
+  action_repeat: 1
   time_limit: 1000
 
   
-  # Acciones discretas (prototipos) -> lista de vectores en [-1,1] del tamaño de action_dim (continuous)
-  # Ajusta esto según el entorno (action_dim lo puedes imprimir con env.action_space.shape)
   action_prototypes:
 
   # 0) noop
   - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]
 
-  # 1-4) micro acciones por articulación (exploración barata)
-  - [ 0.2,  0.0,  0.0,  0.2,  0.0,  0.0]   # hips small +
-  - [-0.2,  0.0,  0.0, -0.2,  0.0,  0.0]   # hips small -
-  - [ 0.0,  0.2,  0.0,  0.0,  0.2,  0.0]   # knees small +
-  - [ 0.0, -0.2,  0.0,  0.0, -0.2,  0.0]   # knees small -
+  # hip
+  - [+0, +0, +0, +1, +0, +0]
+  - [+0, +0, +0, -1, +0, +0]
+  - [+1, +0, +0, +0, +0, +0]
+  - [-1, +0, +0, +0, +0, +0]
 
-  # 5-8) tobillos: muy útiles para estabilidad
-  - [ 0.0,  0.0,  0.25, 0.0,  0.0,  0.25]  # ankles small +
-  - [ 0.0,  0.0, -0.25, 0.0,  0.0, -0.25]  # ankles small -
-  - [ 0.0,  0.0,  0.35, 0.0,  0.0, -0.35]  # ankle split (rollover)
-  - [ 0.0,  0.0, -0.35, 0.0,  0.0,  0.35]  # ankle split opposite
+  # knee
+  - [+0, +0, +0, +1, +0, +0]
+  - [+0, +0, +0, -1, +0, +0]
+  - [+1, +0, +0, +0, +0, +0]
+  - [-1, +0, +0, +0, +0, +0]
 
-  # 9-12) corrección de torso (anti-fall)
-  # idea: si el torso cae hacia atrás, normalmente ayuda:
-  # - meter cadera para "traer" el torso encima del apoyo
-  # - usar tobillo para no colapsar
-  - [ 0.45, 0.10, -0.20, 0.45, 0.10, -0.20]  # lean-forward correction (moderate)
-  - [ 0.70, 0.15, -0.30, 0.70, 0.15, -0.30]  # lean-forward correction (strong)
-  - [-0.35,-0.10, 0.20, -0.35,-0.10, 0.20]   # lean-back correction (moderate)
-  - [-0.55,-0.15, 0.30, -0.55,-0.15, 0.30]   # lean-back correction (strong)
+  # ankle
+  - [+0, +0, +0, +0, +0, +1]
+  - [+0, +0, +0, +0, +0, -1]
+  - [+0, +0, +1, +0, +0, +0]
+  - [+0, +0, -1, +0, +0, +0]
 
-  # 13-16) gait en dos fases (derecha avanza / izquierda avanza)
-  # fase A: derecha swing (thigh/leg/foot) + izquierda stance (más rígida)
-  - [-0.55,  0.85, -0.25,  0.25, -0.35,  0.10]  # gait A (R swing / L stance)
-  - [-0.75,  1.00, -0.35,  0.35, -0.45,  0.15]  # gait A strong
-  # fase B: izquierda swing + derecha stance (simétrica)
-  - [ 0.25, -0.35,  0.10, -0.55,  0.85, -0.25]  # gait B (L swing / R stance)
-  - [ 0.35, -0.45,  0.15, -0.75,  1.00, -0.35]  # gait B strong
+  # tobillo + rodilla
+  - [+0, +0, +0, +0, +1, -1]   # lean-forward correction (moderate)
+  - [+0, +0, +0, +0, -1, +1]   # lean-back correction (strong)
+  - [+0, +1, -1, +0, +0, +0]   # lean-forward correction (moderate)
+  - [+0, -1, +1, +0, +0, +0]   # lean-back correction (strong)
+
+
+
+
+
+
 
 
 
@@ -60,7 +59,8 @@ env:
 
 train:
   # total_steps: 20_000_000
-  total_steps: 800
+  # total_steps: 800
+  total_steps: 80000
   learning_starts: 20_000
   train_freq: 4
   batch_size: 32
@@ -76,7 +76,8 @@ exploration:
   eps_decay_steps: 300000
 
 eval:
-  every_steps: 300
+  # every_steps: 300
+  every_steps: 19_999
   # every_steps: 200_000
   episodes: 5
 
@@ -87,6 +88,6 @@ logging:
   log_every: 200000
 
 stabilizer:
-  initial_intensity: 0.0 #10.5
+  initial_intensity: 0.01 #10.5
   decay: 0.1
   ref_height: 0.95

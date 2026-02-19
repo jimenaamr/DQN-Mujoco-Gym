@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import os
 from typing import Any
 
 import numpy as np
@@ -100,7 +99,7 @@ def run_eval(
     cfg: dict[str, Any] = load_yaml(path=config_path)
     env_spec: EnvSpec = to_env_spec(cfg=cfg)
 
-    os.makedirs(name=video_dir, exist_ok=True)
+    # os.makedirs(name=video_dir, exist_ok=True) EVAL ENV ALREADY CREATES VIDEO DIR
     env = make_eval_env(spec=env_spec, seed=int(seed), video_dir=str(video_dir))
 
     obs_shape_raw: tuple[int, ...] | None = env.observation_space.shape

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -176,6 +177,17 @@ class HeadStabilizerWrapper(gym.Wrapper):
 
         head_speed_now: float = _body_speed(data=self._data, body_id=self._head_id)
         beta: float = float(abs(float(head_speed_now) - float(self._prev_head_speed)))
+
+        if False:
+            print(f"alpha: {alpha:.2f}, beta: {beta:.2f}")
+            print(
+                f"base_force: {base_force:.3f} k_decay: {k_decay:.3f}, dist2: {dist2:.3f}"
+            )
+            print(
+                f"head speed: {head_speed_now:.3f}, prev speed: {self._prev_head_speed:.3f}, head acceleration: {beta:.3f}"
+            )
+
+            time.sleep(5.0)
 
         force_vec: np.ndarray = np.zeros((3,), dtype=np.float64)
         d_norm: float = float(np.linalg.norm(d_xz))
