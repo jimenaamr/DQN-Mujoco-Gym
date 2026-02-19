@@ -61,8 +61,8 @@ env:
 #   grad_clip_norm: 10.0
 
 train:
-  # total_steps: 20_000_000
-  total_steps: 100_000
+  total_steps: 20_000_000
+  # total_steps: 100_000
   # total_steps: 80000
   learning_starts: 2_000
   train_freq: 4
@@ -79,9 +79,9 @@ exploration:
   eps_decay_steps: 300000
 
 eval:
-  every_steps: 49999
+  # every_steps: 49999
   # every_steps: 19_999
-  # every_steps: 200_000
+  every_steps: 200_000
   episodes: 5
 
 logging:
