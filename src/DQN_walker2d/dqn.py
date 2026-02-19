@@ -1,12 +1,18 @@
+# src/DQN_walker2d/dqn.py
+
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+_STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
 
 
 @dataclass
@@ -34,6 +40,9 @@ class _QNet(nn.Module):
 
     def __init__(self, obs_shape: tuple[int, int, int], n_actions: int) -> None:
         super().__init__()
+        c: int
+        h: int
+        w: int
         c, h, w = obs_shape
 
         self.conv: nn.Sequential = nn.Sequential(
@@ -46,8 +55,10 @@ class _QNet(nn.Module):
         )
 
         with torch.no_grad():
-            dummy = torch.zeros((1, int(c), int(h), int(w)), dtype=torch.float32)
-            out = self.conv(dummy)
+            dummy: torch.Tensor = torch.zeros(
+                size=(1, int(c), int(h), int(w)), dtype=torch.float32
+            )
+            out: torch.Tensor = self.conv(dummy)
             flat_dim: int = int(out.reshape(1, -1).shape[1])
 
         self.head: nn.Sequential = nn.Sequential(
@@ -83,7 +94,9 @@ class _ReplayBuffer:
         self.obs_shape: tuple[int, int, int] = obs_shape
 
         self.obs: np.ndarray = np.zeros((self.capacity, *obs_shape), dtype=np.uint8)
-        self.next_obs: np.ndarray = np.zeros((self.capacity, *obs_shape), dtype=np.uint8)
+        self.next_obs: np.ndarray = np.zeros(
+            (self.capacity, *obs_shape), dtype=np.uint8
+        )
         self.actions: np.ndarray = np.zeros((self.capacity,), dtype=np.int64)
         self.rewards: np.ndarray = np.zeros((self.capacity,), dtype=np.float32)
 
@@ -140,8 +153,12 @@ class DQNAgent:
 
         self.n_actions: int = int(n_actions)
 
-        self.q: _QNet = _QNet(obs_shape=obs_shape, n_actions=self.n_actions).to(self.device)
-        self.q_target: _QNet = _QNet(obs_shape=obs_shape, n_actions=self.n_actions).to(self.device)
+        self.q: _QNet = _QNet(obs_shape=obs_shape, n_actions=self.n_actions).to(
+            self.device
+        )
+        self.q_target: _QNet = _QNet(obs_shape=obs_shape, n_actions=self.n_actions).to(
+            self.device
+        )
         self.q_target.load_state_dict(self.q.state_dict())
         self.q_target.eval()
 
@@ -207,23 +224,35 @@ class DQNAgent:
 
     def update(self) -> dict[str, float]:
         """Run a single DQN update step (Double DQN + target sync by updates)."""
-        batch: dict[str, np.ndarray] = self.buffer.sample(batch_size=int(self.cfg.batch_size))
+        batch: dict[str, np.ndarray] = self.buffer.sample(
+            batch_size=int(self.cfg.batch_size)
+        )
 
         obs: torch.Tensor = torch.as_tensor(batch["obs"], device=self.device)
         next_obs: torch.Tensor = torch.as_tensor(batch["next_obs"], device=self.device)
 
-        actions: torch.Tensor = torch.as_tensor(batch["actions"], device=self.device).long()
-        rewards: torch.Tensor = torch.as_tensor(batch["rewards"], device=self.device).float()
-        dones: torch.Tensor = torch.as_tensor(batch["dones"], device=self.device).float()
+        actions: torch.Tensor = torch.as_tensor(
+            batch["actions"], device=self.device
+        ).long()
+        rewards: torch.Tensor = torch.as_tensor(
+            batch["rewards"], device=self.device
+        ).float()
+        dones: torch.Tensor = torch.as_tensor(
+            batch["dones"], device=self.device
+        ).float()
 
-        # Q(s,a)
-        q_a: torch.Tensor = self.q(obs).gather(dim=1, index=actions.view(-1, 1)).squeeze(1)
+        q_a: torch.Tensor = (
+            self.q(obs).gather(dim=1, index=actions.view(-1, 1)).squeeze(1)
+        )
 
         with torch.no_grad():
-            # Double DQN: online selects, target evaluates
             a_star: torch.Tensor = self.q(next_obs).argmax(dim=1, keepdim=True)
-            q_next: torch.Tensor = self.q_target(next_obs).gather(dim=1, index=a_star).squeeze(1)
-            target: torch.Tensor = rewards + (1.0 - dones) * float(self.cfg.gamma) * q_next
+            q_next: torch.Tensor = (
+                self.q_target(next_obs).gather(dim=1, index=a_star).squeeze(1)
+            )
+            target: torch.Tensor = (
+                rewards + (1.0 - dones) * float(self.cfg.gamma) * q_next
+            )
 
         loss: torch.Tensor = F.smooth_l1_loss(q_a, target)
 
@@ -231,7 +260,9 @@ class DQNAgent:
         loss.backward()
 
         if float(self.cfg.grad_clip_norm) > 0.0:
-            nn.utils.clip_grad_norm_(self.q.parameters(), max_norm=float(self.cfg.grad_clip_norm))
+            nn.utils.clip_grad_norm_(
+                self.q.parameters(), max_norm=float(self.cfg.grad_clip_norm)
+            )
 
         self.opt.step()
 
@@ -263,7 +294,6 @@ class DQNAgent:
             "global_step": int(self.global_step),
             "updates": int(self.updates),
             "cfg": dict(self.cfg.__dict__),
-            # Backward-compat keys (optional):
             "q_state": self.q.state_dict(),
             "q_target_state": self.q_target.state_dict(),
             "opt_state": self.opt.state_dict(),
@@ -271,14 +301,23 @@ class DQNAgent:
         torch.save(obj=payload, f=str(path))
 
     def load(self, path: str) -> int:
-        """Load agent weights and optimizer state from a checkpoint."""
+        """Load agent weights and optimizer state from a checkpoint.
+
+        Args:
+            path: Checkpoint path.
+
+        Returns:
+            The loaded global step (0 if missing and filename doesn't encode it).
+        """
         ckpt: dict[str, Any] = torch.load(f=str(path), map_location=self.device)
 
         q_state: dict[str, Any] | None = ckpt.get("q")
         if q_state is None:
             q_state = ckpt.get("q_state")
         if q_state is None:
-            raise KeyError(f"Checkpoint missing Q state. Keys: {sorted(list(ckpt.keys()))}")
+            raise KeyError(
+                f"Checkpoint missing Q state. Keys: {sorted(list(ckpt.keys()))}"
+            )
         self.q.load_state_dict(state_dict=q_state)
 
         q_target_state: dict[str, Any] | None = ckpt.get("q_target")
@@ -293,18 +332,24 @@ class DQNAgent:
         if opt_state is not None:
             self.opt.load_state_dict(state_dict=opt_state)
 
-        loaded_step_any: Any = ckpt.get("global_step", 0)
-        loaded_step: int = int(loaded_step_any) if loaded_step_any is not None else 0
-        self.global_step = int(loaded_step)
+        loaded_step: int = 0
+        if "global_step" in ckpt and ckpt.get("global_step") is not None:
+            loaded_step = int(ckpt["global_step"])
+        else:
+            m: re.Match[str] | None = _STEP_ANYWHERE_RE.search(Path(path).name)
+            if m is not None:
+                loaded_step = int(m.group(1))
 
+        self.global_step = int(loaded_step)
         self.updates = int(ckpt.get("updates", 0))
         return int(loaded_step)
 
 
-def _linear_epsilon(step: int, eps_start: float, eps_end: float, decay_steps: int) -> float:
+def _linear_epsilon(
+    step: int, eps_start: float, eps_end: float, decay_steps: int
+) -> float:
     """Linear epsilon schedule."""
     if decay_steps <= 0:
         return float(eps_end)
     t: float = float(np.clip(step / decay_steps, 0.0, 1.0))
     return float((1.0 - t) * eps_start + t * eps_end)
-

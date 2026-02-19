@@ -29,6 +29,7 @@ from src.DQN_walker2d.monitoring import MONITOR
 os.environ.setdefault(key="MUJOCO_GL", value="egl")
 
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
+_STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
 
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -264,12 +265,30 @@ def _infer_run_name_from_checkpoint(ckpt_file: Path) -> str | None:
     return str(parent.name)
 
 
-def main(config_path: str, resume_path: str | None = None) -> None:
+def _infer_step_from_checkpoint_filename(ckpt_file: Path) -> int | None:
+    """Infer global step from a checkpoint filename like step_5000000_XX-YY-ZZ.pt.
+
+    Args:
+        ckpt_file: Checkpoint file.
+
+    Returns:
+        Parsed step integer, or None if pattern doesn't match.
+    """
+    m: re.Match[str] | None = _STEP_ANYWHERE_RE.search(ckpt_file.name)
+    if m is None:
+        return None
+    return int(m.group(1))
+
+
+def main(
+    config_path: str, resume_path: str | None = None, new_run: bool = False
+) -> None:
     """Entry point for training.
 
     Args:
         config_path: Path to YAML config file.
         resume_path: Optional checkpoint file or directory to resume from.
+        new_run: If True, start a new output directory even when resuming.
     """
     cfg: dict[str, Any] = load_yaml(path=config_path)
     seed: int = int(cfg["seed"])
@@ -307,7 +326,12 @@ def main(config_path: str, resume_path: str | None = None) -> None:
 
     resume_ckpt: Path | None = resolve_resume_path(resume=resume_path)
 
-    if resume_ckpt is not None:
+    # Directory naming policy:
+    # - If not resuming: always new run.
+    # - If resuming:
+    #   - new_run=True -> always new run name
+    #   - new_run=False -> keep run_name inferred from checkpoint dir if possible
+    if resume_ckpt is not None and (not new_run):
         inferred: str | None = _infer_run_name_from_checkpoint(ckpt_file=resume_ckpt)
         run_name: str = inferred or (
             f"{env_spec.env_id}_resume_"
@@ -348,11 +372,32 @@ def main(config_path: str, resume_path: str | None = None) -> None:
 
     start_step: int = 0
     if resume_ckpt is not None:
-        start_step = int(agent.load(path=str(resume_ckpt)))
-        print(
-            f"[train] Resuming from: {resume_ckpt} (start_step={start_step})",
-            flush=True,
+        loaded_step: int = int(agent.load(path=str(resume_ckpt)))
+        inferred_step: int | None = _infer_step_from_checkpoint_filename(
+            ckpt_file=resume_ckpt
         )
+
+        # If checkpoint doesn't contain global_step (old format), infer from filename.
+        if loaded_step <= 0 and inferred_step is not None:
+            loaded_step = int(inferred_step)
+            agent.global_step = int(loaded_step)
+
+        # new_run=True means: load weights but reset counters like a fresh run.
+        if new_run:
+            start_step = 0
+            agent.global_step = 0
+            agent.updates = 0
+            print(
+                f"[train] Resuming weights from: {resume_ckpt} "
+                f"(loaded_step={loaded_step}) -> new run (start_step=0)",
+                flush=True,
+            )
+        else:
+            start_step = int(loaded_step)
+            print(
+                f"[train] Resuming from: {resume_ckpt} (start_step={start_step})",
+                flush=True,
+            )
 
     obs, _ = train_env.reset()
     ep_ret: float = 0.0
@@ -480,5 +525,15 @@ if __name__ == "__main__":
         default=None,
         help="Checkpoint .pt file or directory to resume from (default: None).",
     )
+    parser.add_argument(
+        "--new-run",
+        action="store_true",
+        help="If set and --resume is used, write outputs to a new run directory "
+        "and restart step counters from 0.",
+    )
     args: Namespace = parser.parse_args()
-    main(config_path=str(args.config), resume_path=args.resume)
+    main(
+        config_path=str(args.config),
+        resume_path=args.resume,
+        new_run=bool(args.new_run),
+    )
