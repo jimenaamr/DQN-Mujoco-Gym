@@ -8,8 +8,8 @@ env:
   action_repeat: 1
   time_limit: 1000
 
-  obs_h: 64
-  obs_w: 64
+  obs_h: 42
+  obs_w: 42
 
   
   action_prototypes:
@@ -79,7 +79,7 @@ exploration:
   eps_decay_steps: 300000
 
 eval:
-  every_steps: 29999
+  every_steps: 19999
   # every_steps: 19_999
   # every_steps: 200_000
   episodes: 5
