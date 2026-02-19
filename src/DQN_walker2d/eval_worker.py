@@ -43,7 +43,8 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         action_repeat=int(e["action_repeat"]),
         time_limit=int(e["time_limit"]),
         action_prototypes=e["action_prototypes"],
-        use_pixels=bool(e.get("use_pixels", True)),
+        obs_h=int(e.get("obs_h", 84)),
+        obs_w=int(e.get("obs_w", 84)),
     )
 
 

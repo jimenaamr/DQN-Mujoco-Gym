@@ -22,7 +22,8 @@ class EnvSpec:
     action_repeat: int
     time_limit: int
     action_prototypes: list[list[float]]
-    use_pixels: bool = True
+    obs_h: int
+    obs_w: int
 
 
 class PixelObservationWrapper(gym.Wrapper):
@@ -186,8 +187,7 @@ class DiscreteActionWrapper(gym.Wrapper):
 def make_env(
     spec: EnvSpec, seed: int, stabilizer: StabilizerConfig | None = None
 ) -> gym.Env:
-    render_mode: str | None = "rgb_array" if spec.use_pixels else None
-    env: gym.Env = gym.make(id=spec.env_id, render_mode=render_mode)
+    env: gym.Env = gym.make(id=spec.env_id, render_mode="rgb_array")
 
     env = TimeLimit(env=env, max_episode_steps=int(spec.time_limit))
     env.reset(seed=int(seed))
@@ -195,8 +195,9 @@ def make_env(
     if spec.action_repeat > 1:
         env = ActionRepeat(env=env, repeat=spec.action_repeat)
 
-    if spec.use_pixels:
-        env = PixelObservationWrapper(env=env)
+    env = PixelObservationWrapper(
+        env=env, height=int(spec.obs_h), width=int(spec.obs_w)
+    )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)
     cont_dim: int = int(env.action_space.shape[0])
@@ -215,7 +216,7 @@ def make_env(
     if stabilizer is not None:
         env = HeadStabilizerWrapper(env=env, cfg=stabilizer)
 
-    if spec.frame_stack > 1 and spec.use_pixels:
+    if spec.frame_stack > 1:
         env = FrameStack(env=env, k=spec.frame_stack)
 
     return env
@@ -234,7 +235,9 @@ def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
         disable_logger=True,
     )
 
-    env = PixelObservationWrapper(env=env)
+    env = PixelObservationWrapper(
+        env=env, height=int(spec.obs_h), width=int(spec.obs_w)
+    )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)
     env = DiscreteActionWrapper(

@@ -8,6 +8,9 @@ env:
   action_repeat: 1
   time_limit: 1000
 
+  obs_h: 64
+  obs_w: 64
+
   
   action_prototypes:
 
@@ -59,9 +62,9 @@ env:
 
 train:
   # total_steps: 20_000_000
-  # total_steps: 800
-  total_steps: 80000
-  learning_starts: 20_000
+  total_steps: 40000
+  # total_steps: 80000
+  learning_starts: 2_000
   train_freq: 4
   batch_size: 32
   buffer_size: 200_000
@@ -76,8 +79,8 @@ exploration:
   eps_decay_steps: 300000
 
 eval:
-  # every_steps: 300
-  every_steps: 19_999
+  every_steps: 29999
+  # every_steps: 19_999
   # every_steps: 200_000
   episodes: 5
 

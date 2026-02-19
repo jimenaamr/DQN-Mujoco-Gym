@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import os
+
+os.environ.setdefault(key="MUJOCO_GL", value="egl")  # DEFINE BEFORE IMPORTING GYMNASIUM
+
 import re
 import subprocess
 import tempfile
@@ -25,8 +28,6 @@ from src.DQN_walker2d.helper import (
     stabilizer_config_from_yaml,
 )
 from src.DQN_walker2d.monitoring import MONITOR
-
-os.environ.setdefault(key="MUJOCO_GL", value="egl")
 
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 _STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
@@ -55,6 +56,7 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
     Returns:
         Parsed EnvSpec.
     """
+
     e: dict[str, Any] = cfg["env"]
     return EnvSpec(
         env_id=str(e["env_id"]),
@@ -62,7 +64,8 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         action_repeat=int(e["action_repeat"]),
         time_limit=int(e["time_limit"]),
         action_prototypes=e["action_prototypes"],
-        use_pixels=bool(e.get("use_pixels", True)),
+        obs_h=int(e.get("obs_h", 84)),
+        obs_w=int(e.get("obs_w", 84)),
     )
 
 
@@ -130,18 +133,6 @@ def _run_eval_in_subprocess(
     episodes: int,
     video_dir: str,
 ) -> float:
-    """Run evaluation + video recording in a separate process to isolate EGL.
-
-    Args:
-        config_path: Path to YAML config.
-        checkpoint_path: Path to agent checkpoint.
-        seed: Evaluation seed.
-        episodes: Number of evaluation episodes.
-        video_dir: Folder where eval videos are written.
-
-    Returns:
-        Mean return across episodes.
-    """
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path: str = os.path.join(tmpdir, "eval_return.txt")
 
@@ -162,7 +153,10 @@ def _run_eval_in_subprocess(
             "--output-path",
             str(out_path),
         ]
-        subprocess.run(args=cmd, check=True)
+
+        env: dict[str, str] = dict(os.environ)
+        env["CUDA_VISIBLE_DEVICES"] = ""  # eval on CPU only
+        subprocess.run(args=cmd, check=True, env=env)
 
         with open(file=out_path, encoding="utf-8") as f:
             raw: str = f.read().strip()
@@ -299,6 +293,7 @@ def main(
     train_env = make_env(spec=env_spec, seed=seed, stabilizer=stabilizer_cfg)
 
     obs_shape_raw: tuple[int, ...] | None = train_env.observation_space.shape
+    # assert False, obs_shape_raw
     if obs_shape_raw is None or len(obs_shape_raw) != 3:
         raise ValueError(
             f"Expected pixel obs shape (C,H,W); got {obs_shape_raw}. "
