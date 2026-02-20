@@ -5,6 +5,7 @@ def auto_detect_mujoco_gl() -> str:
     """Auto-detect best MuJoCo GL backend.
 
     Priority:
+        0) Environment variable MUJOCO_GL (if set)
         1) egl
         2) osmesa
 
@@ -13,10 +14,14 @@ def auto_detect_mujoco_gl() -> str:
 
     Prints a warning if neither backend appears available.
     """
-    # 1) Prefer EGL if render node exists (typical GPU system)
+    # 0) Respect explicit environment override
+    env_backend: str | None = os.environ.get("MUJOCO_GL")
+    if env_backend:
+        return env_backend
 
     graphics_backend: str
 
+    # 1) Prefer EGL if render node exists (typical GPU system)
     if os.access(path="/dev/dri/renderD128", mode=os.R_OK | os.W_OK):
         graphics_backend = "egl"
     elif any(
