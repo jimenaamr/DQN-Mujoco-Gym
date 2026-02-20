@@ -224,7 +224,8 @@ class HeadStabilizerWrapper(gym.Wrapper):
         MONITOR.set_agent_contrib(agent_contrib)
         MONITOR.set_real_reward(real_reward)
 
-        return obs, real_reward, bool(terminated), bool(truncated), info
+        # return obs, real_reward, bool(terminated), bool(truncated), info
+        return obs, reward, bool(terminated), bool(truncated), info
 
 
 def _body_speed(data: Any, body_id: int) -> float:

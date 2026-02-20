@@ -1,6 +1,6 @@
 seed: 0
-# device: "gpu"   # "cpu" si no tienes
-device: "cpu"   # "cpu" si no tienes
+device: "gpu"   # "cpu" si no tienes
+# device: "cpu"   # "cpu" si no tienes
 
 env:
   env_id: "Walker2d-v5"
@@ -72,7 +72,7 @@ train:
   lr: 1.0e-4
   target_update_freq: 8000
   grad_clip_norm: 10.0
-  visualiztion: False
+  visualiztion: True
 
 exploration:
   eps_start: 1.0
