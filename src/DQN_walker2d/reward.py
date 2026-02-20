@@ -100,6 +100,8 @@
 
 from __future__ import annotations
 
+import time
+
 import gymnasium as gym
 import numpy as np
 
@@ -139,18 +141,37 @@ def walker2d_default_reward(
     lean_forward: float = x_hips - ((x_foot1 + x_foot2) / 2.0)
     feet_torso_rel_speed: float = min(foot1_speed2d, foot2_speed2d) - torso_speed
 
-    reward: float = 0.0
-    reward += 0.5 * healthy_reward
-    reward += forward_reward
-    reward += lean_forward
-    reward += lowest_foot_height
-    reward += feet_dist
-    reward += 0.1 * max(0, feet_torso_rel_speed) ** 2
-    reward -= 2 * (ctrl_cost**2)
+    # # custom
+    # reward: float = 0.0
+    # reward += 0.5 * healthy_reward
+    # reward += forward_reward
+    # reward += lean_forward
+    # reward += lowest_foot_height
+    # reward += feet_dist
+    # reward += 0.1 * max(0, feet_torso_rel_speed) ** 2
+    # reward -= ctrl_cost
+    # reward -= 2 * (ctrl_cost**2)
 
     # # default reward
+    # reward: float = 0.0
     # reward += healthy_reward
     # reward += forward_reward
     # reward -= ctrl_cost
 
-    return reward
+    # return reward
+
+    # (1) Forward-speed shaping (small + clipped)
+    r: float = 0.0
+    r += healthy_reward
+    r += forward_reward
+    r -= ctrl_cost
+    torso_speed = float(info.get("torso_speed", 0.0))
+    r += 0.10 * float(np.clip(torso_speed, 0.0, 4.0))  # weight small
+    # (2) Alive bonus (small)
+    if not (terminated or truncated):
+        r += 0.05
+
+    print(r, torso_speed, healthy_reward, forward_reward, ctrl_cost, lean_forward)
+    time.sleep(0.5)
+
+    return r
