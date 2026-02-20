@@ -100,8 +100,6 @@
 
 from __future__ import annotations
 
-import time
-
 import gymnasium as gym
 import numpy as np
 
@@ -171,7 +169,7 @@ def walker2d_default_reward(
     if not (terminated or truncated):
         r += 0.05
 
-    print(r, torso_speed, healthy_reward, forward_reward, ctrl_cost, lean_forward)
-    time.sleep(0.5)
+    # print(r, torso_speed, healthy_reward, forward_reward, ctrl_cost, lean_forward)
+    # time.sleep(0.5)
 
     return r
