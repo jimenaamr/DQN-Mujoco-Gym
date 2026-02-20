@@ -148,4 +148,9 @@ def walker2d_default_reward(
     reward += 0.1 * max(0, feet_torso_rel_speed) ** 2
     reward -= 2 * (ctrl_cost**2)
 
+    # # default reward
+    # reward += healthy_reward
+    # reward += forward_reward
+    # reward -= ctrl_cost
+
     return reward

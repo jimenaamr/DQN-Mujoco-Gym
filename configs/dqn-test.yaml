@@ -1,6 +1,6 @@
 seed: 0
-device: "gpu"   # "cpu" si no tienes
-# device: "cpu"   # "cpu" si no tienes
+# device: "gpu"   # "cpu" si no tienes
+device: "cpu"   # "cpu" si no tienes
 
 env:
   env_id: "Walker2d-v5"
@@ -47,23 +47,8 @@ env:
 
 
 
-
-
-# train:
-#   total_steps: 800000
-#   learning_starts: 20000
-#   train_freq: 4
-#   batch_size: 32
-#   buffer_size: 200000
-#   gamma: 0.99
-#   lr: 1.0e-4
-#   target_update_freq: 8000
-#   grad_clip_norm: 10.0
-
 train:
-  total_steps: 20_000_000
-  # total_steps: 100_000
-  # total_steps: 80000
+  total_steps: 20_000
   learning_starts: 2_000
   train_freq: 4
   batch_size: 32
@@ -80,9 +65,7 @@ exploration:
   eps_decay_steps: 300000
 
 eval:
-  # every_steps: 49999
-  # every_steps: 19_999
-  every_steps: 200_000
+  every_steps: 10_000
   episodes: 5
 
 logging:

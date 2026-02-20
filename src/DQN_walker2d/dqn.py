@@ -458,7 +458,7 @@ class DQNAgent:
         }
 
     def update(self) -> dict[str, float]:
-        """Run a single DQN update step (Double DQN + periodic target sync).
+        """Run a single DQN update step (Single DQN + periodic target sync).
 
         Returns:
             Metrics dict with loss, mean Q(s,a), and current epsilon.
@@ -486,15 +486,14 @@ class DQNAgent:
         )
 
         with torch.no_grad():
-            a_star: torch.Tensor = self.q(next_obs).argmax(  # type: ignore[operator]
-                dim=1,
-                keepdim=True,
-            )
+            # Single DQN: select + evaluate with the target network
             q_next: torch.Tensor = (
                 self
-                .q_target(next_obs)  # type: ignore[operator]
-                .gather(dim=1, index=a_star)
-                .squeeze(1)
+                .q_target(next_obs)
+                .max(  # type: ignore[operator]
+                    dim=1
+                )
+                .values
             )
             target: torch.Tensor = rewards + (1.0 - dones) * gamma * q_next
 
