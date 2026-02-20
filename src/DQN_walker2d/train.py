@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault(key="MUJOCO_GL", value="egl")  # DEFINE BEFORE IMPORTING GYMNASIUM
+from src.utils.backends import auto_detect_mujoco_gl
+
+# os.environ.setdefault(key="MUJOCO_GL", value="egl")  # DEFINE BEFORE IMPORTING GYMNASIUM
+
+
+graphics_backend: str = auto_detect_mujoco_gl()
+os.environ.setdefault(key="MUJOCO_GL", value=graphics_backend)
 
 import re
 import subprocess
@@ -533,6 +539,9 @@ def main(
 
 if __name__ == "__main__":
     import argparse
+
+    graphics_backend: str = auto_detect_mujoco_gl()
+    print("[train] graphics_backend:", graphics_backend)
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/dqn.yaml")
