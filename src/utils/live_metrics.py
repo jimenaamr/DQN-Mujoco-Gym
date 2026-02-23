@@ -707,9 +707,21 @@ class MetricViewer:
         """
         if self.radio_tag is None:
             return
+
+        # Avoid rebuilding if labels are identical (prevents flicker/resets on refresh).
+        prev_labels: list[str] = [t.get_text() for t in self.radio_tag.labels]
+        if prev_labels == labels:
+            return
+
+        active_idx: int = 0
+        if self.current_tag is not None and self.current_tag in labels:
+            active_idx = labels.index(self.current_tag)
+        elif self.current_tag is None and "<no scalars>" in labels:
+            active_idx = labels.index("<no scalars>")
+
         ax: Axes = self.radio_tag.ax
         ax.clear()
-        self.radio_tag = RadioButtons(ax, labels, active=0)
+        self.radio_tag = RadioButtons(ax, labels, active=active_idx)
         self.radio_tag.on_clicked(self._on_tag_clicked)
         self._apply_ui_scale()
         self.fig.canvas.draw_idle()
