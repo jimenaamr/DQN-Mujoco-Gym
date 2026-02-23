@@ -8,7 +8,6 @@ from src.utils.backends import auto_detect_mujoco_gl
 
 # os.environ.setdefault(key="MUJOCO_GL", value="egl")  # DEFINE BEFORE IMPORTING GYMNASIUM
 
-
 graphics_backend: str = auto_detect_mujoco_gl()
 os.environ.setdefault(key="MUJOCO_GL", value=graphics_backend)
 
@@ -24,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 import yaml
 from torch.utils.tensorboard import SummaryWriter
@@ -144,6 +144,70 @@ def _extract_last_rgb_frame(obs: np.ndarray) -> np.ndarray:
     return rgb_hwc
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomically write a small text file.
+
+    Args:
+        path: Destination file path.
+        text: Text content.
+    """
+    tmp: Path = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _ensure_dir(path: Path) -> None:
+    """Create a directory if it doesn't exist.
+
+    Args:
+        path: Directory path.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+
+
+def _write_jpg_atomic(path: Path, frame_rgb: np.ndarray, quality: int = 90) -> None:
+    """Write an RGB frame to JPG atomically.
+
+    Args:
+        path: Destination .jpg file.
+        frame_rgb: RGB uint8 frame (H,W,3).
+        quality: JPEG quality (0-100).
+    """
+    if frame_rgb.dtype != np.uint8:
+        frame_rgb = frame_rgb.astype(np.uint8, copy=False)
+
+    frame_bgr: np.ndarray = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+
+    ok: bool
+    buf: np.ndarray
+    ok, buf = cv2.imencode(
+        ext=".jpg",
+        img=frame_bgr,
+        params=[int(cv2.IMWRITE_JPEG_QUALITY), int(quality)],
+    )
+    if not ok:
+        return
+
+    tmp: Path = path.with_suffix(".jpg.tmp")
+    tmp.write_bytes(buf.tobytes())
+    tmp.replace(path)
+
+
+def _live_frames_enabled(cfg: dict[str, Any]) -> bool:
+    """Decide whether filesystem live-frames export is enabled.
+
+    Args:
+        cfg: Full experiment config.
+
+    Returns:
+        True if enabled.
+    """
+    logging_cfg: dict[str, Any] = dict(cfg.get("logging", {}))
+    if "live_frames" in logging_cfg:
+        return bool(logging_cfg.get("live_frames"))
+    return True
+
+
 def _run_eval_in_subprocess(
     config_path: str,
     checkpoint_path: str,
@@ -151,7 +215,18 @@ def _run_eval_in_subprocess(
     episodes: int,
     video_dir: str,
 ) -> float:
-    """Run evaluation in a separate process and return mean return."""
+    """Run evaluation in a separate process and return mean return.
+
+    Args:
+        config_path: YAML config path.
+        checkpoint_path: Checkpoint to evaluate.
+        seed: RNG seed for evaluation.
+        episodes: Number of evaluation episodes.
+        video_dir: Directory to store evaluation videos.
+
+    Returns:
+        Mean return over evaluation episodes.
+    """
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path: str = os.path.join(tmpdir, "eval_return.txt")
 
@@ -427,6 +502,38 @@ def _terminate_process_tree(proc: subprocess.Popen) -> None:
             pass
 
 
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Write text to a file atomically.
+
+    Args:
+        path: Destination file path.
+        text: Text to write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp: Path = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _maybe_env_dt_s(env: Any) -> float | None:
+    """Best-effort extract env dt (seconds per env.step()).
+
+    Args:
+        env: Gymnasium env (possibly wrapped).
+
+    Returns:
+        dt in seconds if available, else None.
+    """
+    base: Any = getattr(env, "unwrapped", env)
+    dt: Any = getattr(base, "dt", None)
+    try:
+        if dt is None:
+            return None
+        return float(dt)
+    except Exception:
+        return None
+
+
 def main(
     config_path: str, resume_path: str | None = None, new_run: bool = False
 ) -> None:
@@ -459,7 +566,7 @@ def main(
     n_actions: int = int(train_env.action_space.n)
 
     dqn_cfg: DQNConfig = to_dqn_cfg(cfg=cfg)
-    agent = DQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=dqn_cfg)
+    agent: DQNAgent = DQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=dqn_cfg)
 
     device_raw: str = str(cfg.get("device", "cpu"))
     print(
@@ -489,10 +596,39 @@ def main(
     os.makedirs(name=run_path, exist_ok=True)
     os.makedirs(name=ckpt_path, exist_ok=True)
 
+    # --- PID + creation time metadata for external visualizers ---
+    pid_file: Path = Path(run_path) / "train.pid"
+    meta_file: Path = Path(run_path) / "train_meta.yaml"
+    created_at_epoch_s: float = float(time.time())
+    _write_text_atomic(path=pid_file, text=f"{int(os.getpid())}\n")
+    _write_text_atomic(
+        path=meta_file,
+        text=yaml.safe_dump({
+            "pid": int(os.getpid()),
+            "created_at_epoch_s": float(created_at_epoch_s),
+            "run_path": str(run_path),
+            "run_name": str(run_name),
+            "env_dt_s": _maybe_env_dt_s(env=train_env),
+        }),
+    )
+    # ------------------------------------------------------------
+
     print(
         f'[train] Metrics viewer: python -m src.utils.display_metrics "{run_path}"',
         flush=True,
     )
+    print(
+        f'[train] Train visualizer: python -m src.utils.live_visualization "{run_path}"',
+        flush=True,
+    )
+
+    # --- live_frames export (used by live_visualization.py) ---
+    live_enabled: bool = bool(_live_frames_enabled(cfg=cfg))
+    live_dir: Path = Path(run_path) / "live_frames"
+    current_ep_file: Path = live_dir / "current_episode.txt"
+    episode_frame_idx: int = 0
+    episode_dir: Path | None = None
+    # ------------------------------------------------------
 
     tb_proc: subprocess.Popen | None = None
     tb_log_path: str = str(Path(run_path) / "tensorboard.log")
@@ -566,6 +702,13 @@ def main(
         episode_idx: int = 0
         MONITOR.set_episode(episode_idx)
 
+        if live_enabled:
+            _ensure_dir(live_dir)
+            _atomic_write_text(current_ep_file, f"{int(episode_idx)}\n")
+            episode_dir = live_dir / f"ep_{int(episode_idx):06d}"
+            _ensure_dir(episode_dir)
+            episode_frame_idx = 0
+
         for step in trange(
             start_step,
             total_steps,
@@ -584,6 +727,14 @@ def main(
             a: int = agent.act(obs=obs, eval_mode=False)
             next_obs, r, terminated, truncated, _ = train_env.step(a)
             done: bool = bool(terminated or truncated)
+
+            if live_enabled and (episode_dir is not None):
+                frame_rgb_live: np.ndarray = np.ascontiguousarray(
+                    _extract_last_rgb_frame(obs=next_obs)
+                )
+                out_file: Path = episode_dir / f"frame_{int(episode_frame_idx):06d}.jpg"
+                _write_jpg_atomic(path=out_file, frame_rgb=frame_rgb_live, quality=90)
+                episode_frame_idx += 1
 
             agent.store(
                 obs=obs, action=a, reward=float(r), next_obs=next_obs, done=done
@@ -643,6 +794,12 @@ def main(
                 ep_ret = 0.0
                 ep_len = 0
 
+                if live_enabled:
+                    _atomic_write_text(current_ep_file, f"{int(episode_idx)}\n")
+                    episode_dir = live_dir / f"ep_{int(episode_idx):06d}"
+                    _ensure_dir(episode_dir)
+                    episode_frame_idx = 0
+
             if (
                 (step > 0)
                 and ((step % eval_every) == 0)
@@ -680,11 +837,19 @@ def main(
         if tb_proc is not None:
             _terminate_process_tree(proc=tb_proc)
 
+        # Cleanup PID/meta files to avoid stale detection.
+        for p in (pid_file, meta_file):
+            try:
+                if p.exists():
+                    p.unlink()
+            except Exception:
+                pass
+
 
 if __name__ == "__main__":
     import argparse
 
-    graphics_backend: str = auto_detect_mujoco_gl()
+    graphics_backend = auto_detect_mujoco_gl()
     print("[train] graphics_backend:", graphics_backend)
 
     parser = argparse.ArgumentParser()

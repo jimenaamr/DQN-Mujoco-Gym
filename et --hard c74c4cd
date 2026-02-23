@@ -1,0 +1,58 @@
+[33mc081820[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/test-miguel[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mtest-miguel[m[33m)[m HEAD@{0}: checkout: moving from test-miguel to main
+[33mc081820[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/test-miguel[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mtest-miguel[m[33m)[m HEAD@{1}: reset: moving to origin/test-miguel
+[33mc081820[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/test-miguel[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mtest-miguel[m[33m)[m HEAD@{2}: checkout: moving from main to test-miguel
+[33mc081820[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/test-miguel[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mtest-miguel[m[33m)[m HEAD@{3}: reset: moving to origin/main
+[33mc74c4cd[m HEAD@{4}: checkout: moving from main to main
+[33mc74c4cd[m HEAD@{5}: commit: add a new script to display metrics on real time and another one to track metrics with tensorboard
+[33mc081820[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/test-miguel[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mtest-miguel[m[33m)[m HEAD@{6}: checkout: moving from test-miguel to main
+[33mc081820[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/test-miguel[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mtest-miguel[m[33m)[m HEAD@{7}: reset: moving to main
+[33mdd10d38[m HEAD@{8}: checkout: moving from test-miguel to test-miguel
+[33mdd10d38[m HEAD@{9}: checkout: moving from main to test-miguel
+[33mc081820[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/test-miguel[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m, [m[1;32mtest-miguel[m[33m)[m HEAD@{10}: commit: remove debugging logs of loss terms
+[33m84d3421[m HEAD@{11}: commit: try new reward fn
+[33m86b9f8c[m HEAD@{12}: commit: fix dqn.py to restore single DQN architecture + fix joint configuration
+[33mdd10d38[m HEAD@{13}: checkout: moving from test-miguel to main
+[33mdd10d38[m HEAD@{14}: reset: moving to origin/test-miguel
+[33mdd10d38[m HEAD@{15}: checkout: moving from main to test-miguel
+[33mdd10d38[m HEAD@{16}: reset: moving to origin/main
+[33mdd10d38[m HEAD@{17}: checkout: moving from test-miguel to main
+[33mdd10d38[m HEAD@{18}: reset: moving to origin/test-miguel
+[33mdd10d38[m HEAD@{19}: checkout: moving from main to test-miguel
+[33mdd10d38[m HEAD@{20}: reset: moving to origin/main
+[33mdd10d38[m HEAD@{21}: checkout: moving from test-miguel to main
+[33mdd10d38[m HEAD@{22}: reset: moving to origin/test-miguel
+[33m8aa1c81[m HEAD@{23}: checkout: moving from main to test-miguel
+[33mdd10d38[m HEAD@{24}: reset: moving to origin/main
+[33m3167d9c[m HEAD@{25}: checkout: moving from test-miguel to main
+[33m8aa1c81[m HEAD@{26}: checkout: moving from main to test-miguel
+[33m3167d9c[m HEAD@{27}: commit: ensure everything up to date
+[33mef6bb20[m HEAD@{28}: checkout: moving from main to main
+[33mef6bb20[m HEAD@{29}: commit: remove debug elements from reward
+[33m8aa1c81[m HEAD@{30}: checkout: moving from test-miguel to main
+[33m8aa1c81[m HEAD@{31}: reset: moving to main
+[33m5ed73b0[m HEAD@{32}: checkout: moving from test-miguel to test-miguel
+[33m5ed73b0[m HEAD@{33}: commit: modify reward fn
+[33mf3e9f5a[m HEAD@{34}: reset: moving to origin/test-miguel
+[33mf3e9f5a[m HEAD@{35}: checkout: moving from main to test-miguel
+[33m8aa1c81[m HEAD@{36}: reset: moving to origin/main
+[33m8aa1c81[m HEAD@{37}: checkout: moving from main to main
+[33m8aa1c81[m HEAD@{38}: commit: modify reward fn
+[33m389f9dd[m HEAD@{39}: commit: modify reward fn
+[33mf9f08e1[m HEAD@{40}: commit: reduce model size
+[33mf3e9f5a[m HEAD@{41}: reset: moving to test-miguel
+[33mecd2c0b[m HEAD@{42}: checkout: moving from test-miguel to main
+[33mf3e9f5a[m HEAD@{43}: commit: crop image
+[33m4e92d15[m HEAD@{44}: commit: more optimizations to DQN
+[33m136a96b[m HEAD@{45}: commit: to torch compile
+[33m7acacd6[m HEAD@{46}: commit: fix action discretization
+[33mecd2c0b[m HEAD@{47}: reset: moving to origin/test-miguel
+[33m55b0278[m HEAD@{48}: checkout: moving from main to test-miguel
+[33mecd2c0b[m HEAD@{49}: reset: moving to origin/main
+[33m55b0278[m HEAD@{50}: checkout: moving from test-miguel to main
+[33m55b0278[m HEAD@{51}: reset: moving to origin/test-miguel
+[33m62c1910[m HEAD@{52}: checkout: moving from main to test-miguel
+[33m55b0278[m HEAD@{53}: reset: moving to origin/main
+[33meb6e002[m HEAD@{54}: checkout: moving from main to main
+[33meb6e002[m HEAD@{55}: checkout: moving from test-miguel to main
+[33m62c1910[m HEAD@{56}: checkout: moving from main to test-miguel
+[33meb6e002[m HEAD@{57}: clone: from github-home-ia-data-duplicates-DQN-Mujoco-Gym:jimenaamr/DQN-Mujoco-Gym.git
