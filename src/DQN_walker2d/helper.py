@@ -9,8 +9,6 @@ from typing import Any
 import gymnasium as gym
 import numpy as np
 
-from src.DQN_walker2d.monitoring import MONITOR
-
 
 def resolve_device(name: str) -> str:
     """Resolve a user-facing device option into a torch device string.
@@ -137,7 +135,7 @@ class HeadStabilizerWrapper(gym.Wrapper):
             action: Discrete action index (passed through to the wrapped env).
 
         Returns:
-            obs, scaled_reward, terminated, truncated, info
+            obs, reward, terminated, truncated, info
         """
         if self._initial_head_z is None or self._prev_head_speed is None:
             raise RuntimeError("reset() must be called before step().")
@@ -209,23 +207,11 @@ class HeadStabilizerWrapper(gym.Wrapper):
         head_speed_after: float = _body_speed(data=self._data, body_id=self._head_id)
         self._prev_head_speed = float(head_speed_after)
 
-        denom: float = float(alpha + beta)
-        agent_contrib: float = float(beta / denom) if denom > 0.0 else 0.0
-        real_reward: float = float(reward) * agent_contrib
+        _denom: float = float(alpha + beta)
+        _agent_contrib: float = float(beta / _denom) if _denom > 0.0 else 0.0
+        _real_reward: float = float(reward) * _agent_contrib
 
-        MONITOR.set_raw_reward(float(reward))
-        MONITOR.set_head_height(head_z)
-        MONITOR.set_acc_fw_reward(self._forward_accum)
-        MONITOR.set_helper_intensity(
-            float(self.cfg.initial_intensity) * float(k_decay)
-            if base_gravity_force > 0.0
-            else 0.0
-        )
-        MONITOR.set_agent_contrib(agent_contrib)
-        MONITOR.set_real_reward(real_reward)
-
-        # return obs, real_reward, bool(terminated), bool(truncated), info
-        return obs, reward, bool(terminated), bool(truncated), info
+        return obs, float(reward), bool(terminated), bool(truncated), info
 
 
 def _body_speed(data: Any, body_id: int) -> float:

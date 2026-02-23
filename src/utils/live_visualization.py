@@ -32,6 +32,19 @@ def _read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomically write a small UTF-8 text file.
+
+    Args:
+        path: Destination path.
+        text: File content.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp: Path = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
 def _load_live_dt() -> float:
     """
     Load live_dt from configs/live.yaml.
@@ -219,11 +232,20 @@ def main(run_path_str: str) -> None:
     _ensure_cv2_qt_fonts_dir()
     import cv2
 
+    def _window_is_alive(name: str) -> bool:
+        """Return True if an OpenCV window still exists (Qt/X close safe)."""
+        try:
+            visible: float = float(cv2.getWindowProperty(name, cv2.WND_PROP_VISIBLE))
+            return visible > 0.0
+        except Exception:
+            return False
+
     live_dt: float = _load_live_dt()
     poll_dt_s: float = 1.0 / LISTEN_HZ
 
     live_dir: Path = run_path / "live_frames"
     current_ep_file: Path = live_dir / "current_episode.txt"
+    cursor_file: Path = live_dir / "visualization_cursor.txt"
 
     window_name: str = "train_visualizer"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -245,6 +267,9 @@ def main(run_path_str: str) -> None:
             mode = "WAIT"
 
         while _is_correct_train_process(info):
+            if not _window_is_alive(window_name):
+                break
+
             cur_ep = _read_current_episode(current_ep_file)
 
             key: int = int(cv2.waitKey(1)) & 0xFF
@@ -296,16 +321,30 @@ def main(run_path_str: str) -> None:
                     continue
 
                 for i, fp in enumerate(buffer):
+                    if not _window_is_alive(window_name):
+                        return
+
                     img = cv2.imread(str(fp))
                     if img is None:
                         continue
                     step = _infer_step(fp)
                     if step is None:
                         step = i
-                    cv2.setWindowTitle(
-                        window_name,
-                        f"episode={record_ep} step={step}",
+
+                    try:
+                        cv2.setWindowTitle(
+                            window_name,
+                            f"episode={record_ep} step={step}",
+                        )
+                    except Exception:
+                        return
+
+                    # Write cursor for other tools to sync precisely.
+                    _atomic_write_text(
+                        cursor_file,
+                        f"episode={int(record_ep)}\nframe={int(step)}\n",
                     )
+
                     cv2.imshow(window_name, img)
 
                     key2: int = int(cv2.waitKey(1)) & 0xFF
@@ -326,7 +365,10 @@ def main(run_path_str: str) -> None:
             time.sleep(poll_dt_s)
 
     finally:
-        cv2.destroyWindow(window_name)
+        try:
+            cv2.destroyWindow(window_name)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

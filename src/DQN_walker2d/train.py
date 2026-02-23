@@ -1,4 +1,5 @@
 # src/DQN_walker2d/train.py
+# (ONLY the relevant changed block shown below is NOT acceptable for you, so here is the FULL FILE)
 
 from __future__ import annotations
 
@@ -193,6 +194,18 @@ def _write_jpg_atomic(path: Path, frame_rgb: np.ndarray, quality: int = 90) -> N
     tmp.replace(path)
 
 
+def _write_metrics_snapshot_atomic(path: Path) -> None:
+    """Write current MONITOR snapshot as a metrics_XXXXXX.txt atomically.
+
+    Args:
+        path: Destination path for metrics text.
+    """
+    text: str = MONITOR.to_text()
+    tmp: Path = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
 def _live_frames_enabled(cfg: dict[str, Any]) -> bool:
     """Decide whether filesystem live-frames export is enabled.
 
@@ -262,15 +275,7 @@ def _format_legend_text() -> str:
     Returns:
         Human-readable debug text for the live viewer overlay.
     """
-    return (
-        f"episode: {MONITOR.episode_index}\n"
-        f"raw reward: {MONITOR.raw_reward:.3f}\n"
-        f"head height: {MONITOR.head_height:.3f}\n"
-        f"acc fw reward: {MONITOR.acc_fw_reward:.3f}\n"
-        f"helper intensity: {MONITOR.helper_intensity:.3f}\n"
-        f"agent contrib: {MONITOR.agent_contrib:.3f}\n"
-        f"real reward: {MONITOR.real_reward:.3f}\n"
-    )
+    return MONITOR.to_text().rstrip("\n")
 
 
 def _select_latest_checkpoint(ckpt_dir: Path) -> Path | None:
@@ -596,7 +601,8 @@ def main(
     os.makedirs(name=run_path, exist_ok=True)
     os.makedirs(name=ckpt_path, exist_ok=True)
 
-    # --- PID + creation time metadata for external visualizers ---
+    MONITOR.set_run_path(run_path=Path(run_path))
+
     pid_file: Path = Path(run_path) / "train.pid"
     meta_file: Path = Path(run_path) / "train_meta.yaml"
     created_at_epoch_s: float = float(time.time())
@@ -610,16 +616,6 @@ def main(
             "run_name": str(run_name),
             "env_dt_s": _maybe_env_dt_s(env=train_env),
         }),
-    )
-    # ------------------------------------------------------------
-
-    print(
-        f'[train] Metrics viewer: python -m src.utils.display_metrics "{run_path}"',
-        flush=True,
-    )
-    print(
-        f'[train] Train visualizer: python -m src.utils.live_visualization "{run_path}"',
-        flush=True,
     )
 
     # --- live_frames export (used by live_visualization.py) ---
@@ -637,6 +633,27 @@ def main(
         run_name=str(run_name),
         tb_log_path=str(tb_log_path),
     )
+
+    # --- NEW PRINT FORMAT (as requested) ---
+    print(
+        f"[train] Live tracking (launch all): "
+        f'python -m src.utils.live_tracking "{run_path}"',
+        flush=True,
+    )
+    print(
+        f'[train]     Live metrics: python -m src.utils.live_metrics "{run_path}"',
+        flush=True,
+    )
+    print(
+        f"[train]     Live visualization: python -m src.utils.live_visualization "
+        f'"{run_path}"',
+        flush=True,
+    )
+    print(
+        f'[train]     Live monitoring: python -m src.utils.live_monitoring "{run_path}"',
+        flush=True,
+    )
+    # --------------------------------------
 
     writer: SummaryWriter = SummaryWriter(log_dir=run_path)
 
@@ -700,7 +717,6 @@ def main(
 
     try:
         episode_idx: int = 0
-        MONITOR.set_episode(episode_idx)
 
         if live_enabled:
             _ensure_dir(live_dir)
@@ -718,6 +734,12 @@ def main(
         ):
             agent.global_step = int(step)
 
+            MONITOR.begin_step(
+                episode=int(episode_idx),
+                global_step=int(step),
+                inner_step=int(ep_len),
+            )
+
             if (render_every > 0) and ((step % render_every) == 0):
                 frame_rgb: np.ndarray = np.ascontiguousarray(
                     _extract_last_rgb_frame(obs=obs)
@@ -734,6 +756,12 @@ def main(
                 )
                 out_file: Path = episode_dir / f"frame_{int(episode_frame_idx):06d}.jpg"
                 _write_jpg_atomic(path=out_file, frame_rgb=frame_rgb_live, quality=90)
+
+                metrics_file: Path = episode_dir / (
+                    f"metrics_{int(episode_frame_idx):06d}.txt"
+                )
+                _write_metrics_snapshot_atomic(path=metrics_file)
+
                 episode_frame_idx += 1
 
             agent.store(
@@ -774,7 +802,6 @@ def main(
 
             if done:
                 episode_idx += 1
-                MONITOR.set_episode(episode_idx)
 
                 writer.add_scalar(
                     tag="train/episode_return",
@@ -837,7 +864,6 @@ def main(
         if tb_proc is not None:
             _terminate_process_tree(proc=tb_proc)
 
-        # Cleanup PID/meta files to avoid stale detection.
         for p in (pid_file, meta_file):
             try:
                 if p.exists():

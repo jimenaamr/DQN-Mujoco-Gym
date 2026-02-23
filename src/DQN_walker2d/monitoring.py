@@ -2,50 +2,157 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Union
+
+MonitorValue = Union[int, float, str]
 
 
-def _t(x: float) -> float:
-    """Truncate to 3 decimals (not round)."""
-    return float(int(x * 1000.0) / 1000.0)
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Write text to a file atomically.
+
+    Args:
+        path: Destination file path.
+        text: Text to write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp: Path = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _format_float(v: float) -> str:
+    """Format a float with up to 3 decimals.
+
+    Notes:
+        Uses rounding to 3 decimals, then strips trailing zeros.
+
+    Args:
+        v: Float value.
+
+    Returns:
+        A compact string with at most 3 decimal digits.
+    """
+    s: str = f"{float(v):.3f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
+
+
+def _format_value(v: MonitorValue) -> str:
+    """Format a monitor value for display.
+
+    Args:
+        v: Value to format.
+
+    Returns:
+        Display string.
+    """
+    if isinstance(v, float):
+        return _format_float(v)
+    return str(v)
 
 
 @dataclass
 class MonitoringState:
-    """Mutable runtime monitoring values shared across modules."""
+    """Mutable monitoring state written by training and read by live_monitoring.
 
-    episode_index: int = 0
+    This is a debugging-oriented key/value store. Training is expected to:
 
-    raw_reward: float = 0.0
-    head_height: float = 0.0
-    acc_fw_reward: float = 0.0
-    helper_intensity: float = 0.0
-    agent_contrib: float = 0.0
-    real_reward: float = 0.0
+      1) Call begin_step(...) at the beginning of each train loop iteration.
+      2) Call add_field(...) to register additional metrics for that step.
+      3) Optionally call flush(...) to force-write the current state.
 
-    # ---------- setters with truncation ----------
+    Live monitoring reads a single text file updated atomically each step.
+    """
 
-    def set_episode(self, idx: int) -> None:
-        self.episode_index = int(idx)
+    _fields: dict[str, MonitorValue] = field(default_factory=dict)
+    _out_path: Path | None = None
 
-    def set_raw_reward(self, v: float) -> None:
-        self.raw_reward = _t(v)
+    def set_run_path(self, run_path: Path) -> None:
+        """Configure the output path under a run directory.
 
-    def set_head_height(self, v: float) -> None:
-        self.head_height = _t(v)
+        Args:
+            run_path: Path to the run directory.
+        """
+        p: Path = Path(run_path).expanduser().resolve()
+        self._out_path = p / "live_monitoring" / "monitor.txt"
 
-    def set_acc_fw_reward(self, v: float) -> None:
-        self.acc_fw_reward = _t(v)
+    def clear(self) -> None:
+        """Clear all fields for the next step."""
+        self._fields.clear()
 
-    def set_helper_intensity(self, v: float) -> None:
-        self.helper_intensity = _t(v)
+    def add_field(self, name: str, value: MonitorValue) -> None:
+        """Add a new field.
 
-    def set_agent_contrib(self, v: float) -> None:
-        self.agent_contrib = _t(v)
+        Args:
+            name: Field name.
+            value: Field value.
 
-    def set_real_reward(self, v: float) -> None:
-        self.real_reward = _t(v)
+        Raises:
+            AssertionError: If the field name already exists in the state.
+        """
+        key: str = str(name)
+        assert key not in self._fields, f"Field already exists: {key}"
+        self._fields[key] = value
+
+    def begin_step(self, episode: int, global_step: int, inner_step: int) -> None:
+        """Reset fields and seed the standard step identifiers.
+
+        Args:
+            episode: Episode index.
+            global_step: Global environment step.
+            inner_step: Step within the current episode.
+        """
+        self.clear()
+        self.add_field(name="episode", value=int(episode))
+        self.add_field(name="global_step", value=int(global_step))
+        self.add_field(name="inner_step", value=int(inner_step))
+        self.flush()
+
+    def to_text(self) -> str:
+        """Render the current fields as text lines.
+
+        Returns:
+            Multi-line text "name: value" in insertion order.
+        """
+        lines: list[str] = []
+        for k, v in self._fields.items():
+            lines.append(f"{k}: {_format_value(v)}")
+        return "\n".join(lines) + "\n"
+
+    def flush(self) -> None:
+        """Atomically write the current state to disk (if configured)."""
+        if self._out_path is None:
+            return
+        _write_text_atomic(path=self._out_path, text=self.to_text())
 
 
-# single shared instance (minimal global state)
+def add_field(name: str, value: MonitorValue) -> None:
+    """Module-level helper to add a field to the global MONITOR.
+
+    Args:
+        name: Field name.
+        value: Field value.
+    """
+    MONITOR.add_field(name=name, value=value)
+    MONITOR.flush()
+
+
+def begin_step(episode: int, global_step: int, inner_step: int) -> None:
+    """Module-level helper to reset and seed the global MONITOR.
+
+    Args:
+        episode: Episode index.
+        global_step: Global environment step.
+        inner_step: Step within episode.
+    """
+    MONITOR.begin_step(
+        episode=int(episode),
+        global_step=int(global_step),
+        inner_step=int(inner_step),
+    )
+
+
 MONITOR: MonitoringState = MonitoringState()
