@@ -1,4 +1,4 @@
-# src/DQN_walker2d/eval_worker.py
+# src/dqn/eval_worker.py
 
 from __future__ import annotations
 
@@ -7,10 +7,9 @@ from typing import Any
 
 import numpy as np
 import yaml
-
-from src.DQN_walker2d.dqn import DQNAgent, DQNConfig
-from src.DQN_walker2d.env import EnvSpec, make_eval_env
-from src.DQN_walker2d.helper import resolve_device
+from src.dqn.dqn import DQNAgent, DQNConfig
+from src.dqn.env import EnvSpec, make_eval_env
+from src.dqn.helper import resolve_device
 
 
 def load_yaml(path: str) -> dict[str, Any]:

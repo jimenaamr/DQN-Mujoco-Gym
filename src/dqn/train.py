@@ -1,4 +1,4 @@
-# src/DQN_walker2d/train.py
+# src/dqn/train.py
 
 from __future__ import annotations
 
@@ -26,20 +26,36 @@ from typing import Any
 import cv2
 import numpy as np
 import yaml
-from torch.utils.tensorboard import SummaryWriter
-from tqdm import trange
-
-from src.DQN_walker2d.dqn import DQNAgent, DQNConfig
-from src.DQN_walker2d.env import EnvSpec, make_env
-from src.DQN_walker2d.helper import (
+from src.dqn.dqn import DQNAgent, DQNConfig
+from src.dqn.env import EnvSpec, make_env
+from src.dqn.helper import (
     StabilizerConfig,
     resolve_device,
     stabilizer_config_from_yaml,
 )
-from src.DQN_walker2d.monitoring import MONITOR
+from src.dqn.monitoring import MONITOR
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import trange
 
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 _STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
+
+
+def _ensure_dqn_subdir(root: str) -> str:
+    """Ensure a root directory is namespaced under 'dqn'.
+
+    If root already includes a 'dqn' path component, it is returned unchanged.
+
+    Args:
+        root: Base directory (e.g., "runs", "runs/dqn").
+
+    Returns:
+        Directory under the dqn namespace (e.g., "runs/dqn").
+    """
+    p: Path = Path(root)
+    if "dqn" in p.parts:
+        return str(p)
+    return str(p / "dqn")
 
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -244,7 +260,7 @@ def _run_eval_in_subprocess(
         cmd: list[str] = [
             "python",
             "-m",
-            "src.DQN_walker2d.eval_worker",
+            "src.dqn.eval_worker",
             "--config",
             str(config_path),
             "--checkpoint",
@@ -332,7 +348,10 @@ def resolve_resume_path(resume: str | None) -> Path | None:
 
 
 def _infer_run_name_from_checkpoint(ckpt_file: Path) -> str | None:
-    """Infer run name from a checkpoint path: checkpoints/<run_name>/<file>.pt.
+    """Infer run name from a checkpoint path.
+
+    Expected layout:
+        checkpoints/dqn/<run_name>/<file>.pt
 
     Args:
         ckpt_file: Checkpoint file path.
@@ -537,8 +556,10 @@ def main(
         f"[train] device config: {device_raw} -> resolved: {dqn_cfg.device}", flush=True
     )
 
-    run_dir: str = str(cfg["logging"]["run_dir"])
-    ckpt_dir: str = str(cfg["logging"]["ckpt_dir"])
+    run_dir_raw: str = str(cfg["logging"]["run_dir"])
+    ckpt_dir_raw: str = str(cfg["logging"]["ckpt_dir"])
+    run_dir: str = _ensure_dqn_subdir(root=run_dir_raw)
+    ckpt_dir: str = _ensure_dqn_subdir(root=ckpt_dir_raw)
     os.makedirs(name=run_dir, exist_ok=True)
     os.makedirs(name=ckpt_dir, exist_ok=True)
 
@@ -778,7 +799,9 @@ def main(
                 ckpt_file: str = os.path.join(ckpt_path, f"step_{step}_{timestamp}.pt")
                 agent.save(path=ckpt_file)
 
-                video_dir: str = os.path.join("videos", run_name, f"step_{step}")
+                video_dir: str = str(
+                    Path("videos") / "dqn" / str(run_name) / f"step_{int(step)}"
+                )
 
                 eval_ret: float = _run_eval_in_subprocess(
                     config_path=str(config_path),

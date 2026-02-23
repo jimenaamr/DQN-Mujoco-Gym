@@ -1,4 +1,4 @@
-# src/DQN_walker2d/env.py
+# src/dqn/env.py
 
 from __future__ import annotations
 
@@ -11,9 +11,8 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
-
-from src.DQN_walker2d.helper import HeadStabilizerWrapper, StabilizerConfig
-from src.DQN_walker2d.reward import walker2d_default_reward
+from src.dqn.helper import HeadStabilizerWrapper, StabilizerConfig
+from src.dqn.reward import walker2d_default_reward
 
 # CROPS = (top, bottom, left, right)  # fractions of each border to crop (e.g., 0.10 = 10%)
 CROPS: tuple[float, float, float, float] = (0.25, 0.05, 0.1, 0.1)
@@ -257,7 +256,7 @@ class EnvSpec:
     action_prototypes: list[list[float]]
     obs_h: int
     obs_w: int
-    grayscale: bool = False  # <- NUEVO
+    grayscale: bool = False
 
 
 class PixelObservationWrapper(gym.Wrapper):
@@ -335,7 +334,6 @@ class PixelObservationWrapper(gym.Wrapper):
         )
 
         if self.grayscale:
-            # Convert RGB->GRAY, then add channel dim -> (1,H,W)
             gray: np.ndarray = cv2.cvtColor(src=frame, code=cv2.COLOR_RGB2GRAY)
             gray_chw: np.ndarray = gray[None, :, :]
             return gray_chw.astype(dtype=np.uint8)
@@ -420,7 +418,6 @@ class PixelObservationWrapper(gym.Wrapper):
             info["y_foot2"] = y2
             info["z_foot2"] = z2
 
-        # Lowest foot height (z) among the two feet.
         if foot1_pos is not None and foot2_pos is not None:
             lowest_foot_height: float = float(min(foot1_pos[2], foot2_pos[2]))
             info["lowest_foot_height"] = lowest_foot_height
@@ -429,7 +426,6 @@ class PixelObservationWrapper(gym.Wrapper):
         elif foot2_pos is not None:
             info["lowest_foot_height"] = float(foot2_pos[2])
 
-        # Feet distance (2D): sqrt((dx)^2 + (dy)^2) in the horizontal plane (x,y).
         if foot1_pos is not None and foot2_pos is not None:
             dx: float = float(foot1_pos[0] - foot2_pos[0])
             dy: float = float(foot1_pos[1] - foot2_pos[1])
@@ -570,7 +566,7 @@ def make_env(
         env=env,
         height=int(spec.obs_h),
         width=int(spec.obs_w),
-        grayscale=bool(spec.grayscale),  # <- NUEVO
+        grayscale=bool(spec.grayscale),
     )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)
@@ -613,7 +609,7 @@ def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
         env=env,
         height=int(spec.obs_h),
         width=int(spec.obs_w),
-        grayscale=bool(spec.grayscale),  # <- NUEVO
+        grayscale=bool(spec.grayscale),
     )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)

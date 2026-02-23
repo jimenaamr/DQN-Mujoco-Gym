@@ -10,13 +10,13 @@ https://gymnasium.farama.org/environments/mujoco/walker2d/?utm_source=chatgpt.co
 1. Start training from zero:
 
 ```bash
-python -m src.DQN_walker2d.train --config configs/dqn.yaml
+python -m src.dqn.train --config configs/dqn.yaml
 ```
 
 2. Resume from a specific checkpoint:
 
 ```bash
-python -m src.DQN_walker2d.train \
+python -m src.dqn.train \
   --config configs/dqn.yaml \
   --resume checkpoints/Walker2d-v5_20260218_185009/step_5000000_07-36-34.pt
 ```
@@ -24,7 +24,7 @@ python -m src.DQN_walker2d.train \
 3. Resume from the latest checkpoint of a run **saving videos & checkpoints on the same run directories**:
 
 ```bash
-python -m src.DQN_walker2d.train \
+python -m src.dqn.train \
   --config configs/dqn.yaml \
   --resume checkpoints/Walker2d-v5_20260218_185009/
 ```
@@ -32,7 +32,7 @@ python -m src.DQN_walker2d.train \
 4. Resume from the latest checkpoint of a run **saving videos & checkpoints on a new run directories**:
 
 ```bash
-python -m src.DQN_walker2d.train \
+python -m src.dqn.train \
   --config configs/dqn.yaml \
   --resume checkpoints/Walker2d-v5_20260218_185009/ \
   --new-run
