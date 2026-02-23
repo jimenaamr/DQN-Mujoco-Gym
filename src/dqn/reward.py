@@ -117,43 +117,31 @@ def walker2d_default_reward(
         reward = healthy_reward + forward_reward - ctrl_cost
                  + 0.10*clip(torso_speed,0,4)
                  + 0.20*clip(feet_dist,0,2)
-                 + 0.10*clip(head_torso_dz,0,1)
+                 + 0.10*clip(z_torso - torso_height_offset,0,1)
                  + alive_bonus
     """
     healthy_reward: float = float(info.get("reward_survive", 0.0))
     forward_reward: float = float(info.get("reward_forward", 0.0))
     ctrl_cost: float = float(info.get("reward_ctrl", 0.0))
 
-    x_hips: float = float(info.get("x_hips", 0.0))
-    x_foot1: float = float(info.get("x_foot1", 0.0))
-    x_foot2: float = float(info.get("x_foot2", 0.0))
-
     feet_dist: float = float(info.get("feet_dist_2d", 0.0))
-    lowest_foot_height: float = float(info.get("lowest_foot_height", 0.0))
-
-    foot1_speed2d: float = float(info.get("foot1_speed2d", 0.0))
-    foot2_speed2d: float = float(info.get("foot2_speed2d", 0.0))
     torso_speed: float = float(info.get("torso_speed", 0.0))
 
-    lean_forward: float = x_hips - ((x_foot1 + x_foot2) / 2.0)
-    feet_torso_rel_speed: float = min(foot1_speed2d, foot2_speed2d) - torso_speed
-
-    # (1) Base (env-like) reward
     r: float = 0.0
     r += healthy_reward
     r += forward_reward
     r -= ctrl_cost
 
-    # (2) Forward-speed shaping (small + clipped)
-    torso_speed = float(info.get("torso_speed", 0.0))
+    # Speed + stride-ish shaping (your previous terms).
     r += 0.10 * float(np.clip(torso_speed, 0.0, 4.0))
     r += 0.20 * float(np.clip(feet_dist, 0.0, 2.0))
 
-    # (3) Vertical separation shaping: reward head being above torso (clipped)
-    head_torso_dz: float = float(info.get("head_torso_dz", 0.0))
-    r += 0.10 * float(np.clip(head_torso_dz, 0.0, 1.0))
+    # Torso height shaping: reward being above an offset baseline.
+    z_torso: float = float(info.get("z_torso", 0.0))
+    torso_height_offset: float = 1.1
+    torso_height_term: float = float(z_torso - torso_height_offset)
+    r += 0.10 * torso_height_term
 
-    # (4) Alive bonus (small)
     if not (terminated or truncated):
         r += 0.05
 
@@ -167,10 +155,12 @@ def walker2d_default_reward(
         name="capped_weighted_feet_dist",
         value=0.20 * float(np.clip(feet_dist, 0.0, 2.0)),
     )
-    MONITOR.add_field(name="head_torso_dz", value=head_torso_dz)
+    MONITOR.add_field(name="z_torso", value=z_torso)
+    MONITOR.add_field(name="torso_height_offset", value=torso_height_offset)
+    MONITOR.add_field(name="torso_height_term", value=torso_height_term)
     MONITOR.add_field(
-        name="capped_weighted_head_torso_dz",
-        value=0.10 * float(np.clip(head_torso_dz, 0.0, 1.0)),
+        name="capped_weighted_torso_height_term",
+        value=0.10 * torso_height_term,
     )
 
     return r

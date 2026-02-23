@@ -418,11 +418,30 @@ class PixelObservationWrapper(gym.Wrapper):
             names=torso_names,
         )
 
-        head_names: tuple[str, ...] = ("head", "neck", "upper_body", "upper")
-        head_pos: tuple[float, float, float] | None = _first_body_pos(
-            env=self.env,
-            names=head_names,
-        )
+        # Torso z: body, else geom fallback.
+        torso_z: float | None = None
+        if torso_pos is not None:
+            torso_z = float(torso_pos[2])
+        else:
+            torso_geom_candidates: tuple[str, ...] = (
+                "torso",
+                "torso_geom",
+                "body",
+                "trunk",
+            )
+            torso_geom_pos: tuple[float, float, float] | None = _first_geom_pos(
+                env=self.env,
+                names=torso_geom_candidates,
+            )
+            if torso_geom_pos is not None:
+                torso_z = float(torso_geom_pos[2])
+
+        if x_hips is not None:
+            info["x_hips"] = float(x_hips)
+        if torso_speed is not None:
+            info["torso_speed"] = float(torso_speed)
+        if torso_z is not None:
+            info["z_torso"] = float(torso_z)
 
         foot1_geom_candidates: tuple[str, ...] = (
             "foot",
@@ -456,18 +475,6 @@ class PixelObservationWrapper(gym.Wrapper):
             env=self.env,
             names=foot2_geom_candidates,
         )
-
-        if x_hips is not None:
-            info["x_hips"] = float(x_hips)
-        if torso_speed is not None:
-            info["torso_speed"] = float(torso_speed)
-
-        if torso_pos is not None:
-            info["z_torso"] = float(torso_pos[2])
-        if head_pos is not None:
-            info["z_head"] = float(head_pos[2])
-        if torso_pos is not None and head_pos is not None:
-            info["head_torso_dz"] = float(head_pos[2] - torso_pos[2])
 
         if foot1_speed2d is not None:
             info["foot1_speed2d"] = float(foot1_speed2d)
