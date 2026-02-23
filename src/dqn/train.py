@@ -26,6 +26,9 @@ from typing import Any
 import cv2
 import numpy as np
 import yaml
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import trange
+
 from src.dqn.dqn import DQNAgent, DQNConfig
 from src.dqn.env import EnvSpec, make_env
 from src.dqn.helper import (
@@ -34,8 +37,6 @@ from src.dqn.helper import (
     stabilizer_config_from_yaml,
 )
 from src.dqn.monitoring import MONITOR
-from torch.utils.tensorboard import SummaryWriter
-from tqdm import trange
 
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 _STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
