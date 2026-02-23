@@ -11,6 +11,8 @@ env:
   obs_h: 40
   obs_w: 40
 
+  grayscale: false
+
   
   action_prototypes:
 

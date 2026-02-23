@@ -165,6 +165,7 @@ def walker2d_default_reward(
     r -= ctrl_cost
     torso_speed = float(info.get("torso_speed", 0.0))
     r += 0.10 * float(np.clip(torso_speed, 0.0, 4.0))  # weight small
+    r += 0.10 * feet_dist
     # (2) Alive bonus (small)
     if not (terminated or truncated):
         r += 0.05

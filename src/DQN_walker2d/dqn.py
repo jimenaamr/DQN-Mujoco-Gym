@@ -200,6 +200,89 @@ def _compile_module(m: nn.Module) -> nn.Module:
     )
 
 
+def _conv_out_size(size: int, kernel: int, stride: int) -> int:
+    """Compute Conv2d output spatial size for valid padding.
+
+    Args:
+        size: Input spatial size (H or W).
+        kernel: Kernel size.
+        stride: Stride.
+
+    Returns:
+        Output size after convolution.
+    """
+    return int((int(size) - int(kernel)) // int(stride) + 1)
+
+
+def _flat_dim_from_hw(h: int, w: int) -> int:
+    """Compute the flattened dimension after the fixed conv stack.
+
+    This matches _QNet.conv:
+      Conv2d(k=8,s=4,out=16) then Conv2d(k=4,s=2,out=32)
+
+    Args:
+        h: Input height.
+        w: Input width.
+
+    Returns:
+        Flattened dimension = 32 * out_h * out_w.
+    """
+    h1: int = _conv_out_size(size=int(h), kernel=8, stride=4)
+    w1: int = _conv_out_size(size=int(w), kernel=8, stride=4)
+    h2: int = _conv_out_size(size=int(h1), kernel=4, stride=2)
+    w2: int = _conv_out_size(size=int(w1), kernel=4, stride=2)
+    return int(32 * h2 * w2)
+
+
+def _extract_ckpt_flat_dim(q_state: dict[str, Any]) -> int | None:
+    """Extract checkpoint expected flat_dim from head.0.weight.
+
+    Supports both normal and torch.compile OptimizedModule keys.
+
+    Args:
+        q_state: The checkpoint 'q' state_dict.
+
+    Returns:
+        flat_dim (in_features of head.0) or None if not found.
+    """
+    for k, v in q_state.items():
+        if not isinstance(k, str):
+            continue
+        if not k.endswith("head.0.weight"):
+            continue
+        try:
+            shape: tuple[int, ...] = tuple(int(x) for x in v.shape)  # type: ignore[attr-defined]
+        except Exception:
+            return None
+        if len(shape) != 2:
+            return None
+        return int(shape[1])
+    return None
+
+
+def _infer_hw_for_flat_dim(
+    flat_dim: int,
+    min_hw: int = 16,
+    max_hw: int = 256,
+) -> tuple[int, int] | None:
+    """Infer (H,W) that matches a given flat_dim for this conv stack.
+
+    Args:
+        flat_dim: Expected flattened dimension after conv stack.
+        min_hw: Minimum H/W to consider.
+        max_hw: Maximum H/W to consider.
+
+    Returns:
+        (H,W) if found else None.
+    """
+    target: int = int(flat_dim)
+    for h in range(int(min_hw), int(max_hw) + 1):
+        for w in range(int(min_hw), int(max_hw) + 1):
+            if _flat_dim_from_hw(h=int(h), w=int(w)) == target:
+                return (int(h), int(w))
+    return None
+
+
 class DQNAgent:
     """DQN agent with epsilon-greedy policy and target network."""
 
@@ -218,6 +301,7 @@ class DQNAgent:
         """
         self.cfg: DQNConfig = cfg
         self.device: torch.device = torch.device(str(cfg.device))
+        self.obs_shape: tuple[int, int, int] = obs_shape
 
         if self.device.type == "cuda":
             torch.set_float32_matmul_precision("medium")
@@ -489,10 +573,8 @@ class DQNAgent:
             # Single DQN: select + evaluate with the target network
             q_next: torch.Tensor = (
                 self
-                .q_target(next_obs)
-                .max(  # type: ignore[operator]
-                    dim=1
-                )
+                .q_target(next_obs)  # type: ignore[operator]
+                .max(dim=1)
                 .values
             )
             target: torch.Tensor = rewards + (1.0 - dones) * gamma * q_next
@@ -562,6 +644,28 @@ class DQNAgent:
             raise KeyError(
                 f"Checkpoint missing Q state. Keys: {sorted(list(ckpt.keys()))}"
             )
+
+        ckpt_flat_dim: int | None = _extract_ckpt_flat_dim(q_state=q_state)
+        if ckpt_flat_dim is not None:
+            c: int
+            h: int
+            w: int
+            c, h, w = self.obs_shape
+            cur_flat_dim: int = _flat_dim_from_hw(h=int(h), w=int(w))
+            if int(cur_flat_dim) != int(ckpt_flat_dim):
+                need_hw: tuple[int, int] | None = _infer_hw_for_flat_dim(
+                    flat_dim=int(ckpt_flat_dim),
+                )
+                need_str: str = f"{need_hw}" if need_hw is not None else "unknown"
+                raise RuntimeError(
+                    "Checkpoint/model observation size mismatch.\n"
+                    f"  current obs_shape: (C,H,W)=({c},{h},{w}) "
+                    f"-> flat_dim={cur_flat_dim}\n"
+                    f"  checkpoint expects flat_dim={ckpt_flat_dim} "
+                    f"(implies H,W≈{need_str})\n"
+                    "Fix: run with matching env obs_h/obs_w (or regenerate checkpoint)."
+                )
+
         self.q.load_state_dict(state_dict=q_state)
 
         q_target_state: dict[str, Any] | None = ckpt.get("q_target")

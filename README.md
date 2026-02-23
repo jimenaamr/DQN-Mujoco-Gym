@@ -37,3 +37,13 @@ python -m src.DQN_walker2d.train \
   --resume checkpoints/Walker2d-v5_20260218_185009/ \
   --new-run
 ```
+
+## Open tensorboard webpage
+
+```bash
+python -m tensorboard.main --logdir runs --port 6006
+```
+
+```bash
+python -m src.utils.display_metrics Walker2d-v5_20260223_092118
+```

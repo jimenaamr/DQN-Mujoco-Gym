@@ -13,8 +13,12 @@ graphics_backend: str = auto_detect_mujoco_gl()
 os.environ.setdefault(key="MUJOCO_GL", value=graphics_backend)
 
 import re
+import signal
+import socket
 import subprocess
+import sys
 import tempfile
+import time
 from argparse import Namespace
 from datetime import datetime
 from pathlib import Path
@@ -71,6 +75,7 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         action_prototypes=e["action_prototypes"],
         obs_h=int(e.get("obs_h", 84)),
         obs_w=int(e.get("obs_w", 84)),
+        grayscale=bool(e.get("grayscale")),
     )
 
 
@@ -112,23 +117,31 @@ def to_dqn_cfg(cfg: dict[str, Any]) -> DQNConfig:
 def _extract_last_rgb_frame(obs: np.ndarray) -> np.ndarray:
     """Extract an RGB frame (H, W, 3) from an observation shaped like (C, H, W).
 
+    For grayscale observations (C < 3), replicate the last channel into RGB.
+
     Args:
-        obs: Observation array with shape (C, H, W) and C >= 3.
+        obs: Observation array with shape (C, H, W) and C >= 1.
 
     Returns:
         RGB frame with shape (H, W, 3).
 
     Raises:
-        ValueError: If obs does not have 3 dims or C < 3.
+        ValueError: If obs does not have 3 dims or C < 1.
     """
     if obs.ndim != 3:
         raise ValueError(f"Expected obs with shape (C,H,W), got {obs.shape}")
     c: int = int(obs.shape[0])
-    if c < 3:
-        raise ValueError(f"Expected at least 3 channels, got C={c}")
-    frame_chw: np.ndarray = obs[c - 3 : c, :, :]
-    frame_hwc: np.ndarray = np.transpose(frame_chw, (1, 2, 0))
-    return frame_hwc
+    if c < 1:
+        raise ValueError(f"Expected at least 1 channel, got C={c}")
+
+    if c >= 3:
+        frame_chw: np.ndarray = obs[c - 3 : c, :, :]
+        frame_hwc: np.ndarray = np.transpose(frame_chw, (1, 2, 0))
+        return frame_hwc
+
+    gray_hw: np.ndarray = obs[c - 1, :, :]
+    rgb_hwc: np.ndarray = np.stack((gray_hw, gray_hw, gray_hw), axis=-1)
+    return rgb_hwc
 
 
 def _run_eval_in_subprocess(
@@ -161,7 +174,6 @@ def _run_eval_in_subprocess(
         ]
 
         env: dict[str, str] = dict(os.environ)
-        # env["CUDA_VISIBLE_DEVICES"] = ""  # eval on CPU only
         subprocess.run(args=cmd, check=True, env=env)
 
         with open(file=out_path, encoding="utf-8") as f:
@@ -310,6 +322,111 @@ def _train_visualization_enabled(cfg: dict[str, Any]) -> bool:
     return True
 
 
+def _is_listening(host: str, port: int) -> bool:
+    """Check whether a TCP host:port has a listener.
+
+    Args:
+        host: Host to connect to.
+        port: TCP port.
+
+    Returns:
+        True if connection succeeds, else False.
+    """
+    s: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.settimeout(0.25)
+        return s.connect_ex((host, int(port))) == 0
+    finally:
+        s.close()
+
+
+def _launch_tensorboard(
+    run_dir: str,
+    run_name: str,
+    tb_log_path: str,
+) -> subprocess.Popen | None:
+    """Launch TensorBoard non-blocking using the current Python environment.
+
+    Args:
+        run_dir: Root directory containing all runs.
+        run_name: Current run name (for display only).
+        tb_log_path: File path to write TensorBoard stdout/stderr.
+
+    Returns:
+        The Popen handle if started, else None.
+    """
+    port_raw: str = str(os.environ.get(key="TENSORBOARD_PORT", default="6006"))
+    try:
+        port: int = int(port_raw)
+    except ValueError:
+        port = 6006
+
+    cmd: list[str] = [
+        str(sys.executable),
+        "-m",
+        "tensorboard.main",
+        "--logdir",
+        str(run_dir),
+        "--port",
+        str(int(port)),
+        "--bind_all",
+    ]
+
+    tb_log_file = open(file=tb_log_path, mode="w", encoding="utf-8")
+
+    try:
+        proc: subprocess.Popen = subprocess.Popen(
+            args=cmd,
+            stdout=tb_log_file,
+            stderr=subprocess.STDOUT,
+            env=dict(os.environ),
+            start_new_session=True,
+        )
+    except Exception:
+        tb_log_file.close()
+        return None
+
+    deadline_s: float = time.time() + 3.0
+    while time.time() < deadline_s:
+        if proc.poll() is not None:
+            break
+        if _is_listening(host="127.0.0.1", port=int(port)):
+            break
+        time.sleep(0.05)
+
+    url: str = f"http://localhost:{int(port)}/"
+
+    if _is_listening(host="127.0.0.1", port=int(port)):
+        print(f"[train] TensorBoard: {url} (run: {run_name})", flush=True)
+        return proc
+
+    print(
+        f"[train] WARNING: TensorBoard failed to start. See log: {tb_log_path}",
+        flush=True,
+    )
+    return proc
+
+
+def _terminate_process_tree(proc: subprocess.Popen) -> None:
+    """Terminate a subprocess (and its process group) best-effort.
+
+    Args:
+        proc: Process handle.
+    """
+    try:
+        if proc.poll() is not None:
+            return
+        pgid: int = int(os.getpgid(proc.pid))
+        os.killpg(pgid, signal.SIGTERM)
+        proc.wait(timeout=3.0)
+    except Exception:
+        try:
+            pgid = int(os.getpgid(proc.pid))
+            os.killpg(pgid, signal.SIGKILL)
+        except Exception:
+            pass
+
+
 def main(
     config_path: str, resume_path: str | None = None, new_run: bool = False
 ) -> None:
@@ -372,6 +489,19 @@ def main(
     os.makedirs(name=run_path, exist_ok=True)
     os.makedirs(name=ckpt_path, exist_ok=True)
 
+    print(
+        f'[train] Metrics viewer: python -m src.utils.display_metrics "{run_path}"',
+        flush=True,
+    )
+
+    tb_proc: subprocess.Popen | None = None
+    tb_log_path: str = str(Path(run_path) / "tensorboard.log")
+    tb_proc = _launch_tensorboard(
+        run_dir=str(run_dir),
+        run_name=str(run_name),
+        tb_log_path=str(tb_log_path),
+    )
+
     writer: SummaryWriter = SummaryWriter(log_dir=run_path)
 
     with open(
@@ -396,6 +526,7 @@ def main(
     viewer.start()
 
     start_step: int = 0
+    skip_eval_step: int | None = None
     if resume_ckpt is not None:
         loaded_step: int = int(agent.load(path=str(resume_ckpt)))
         inferred_step: int | None = _infer_step_from_checkpoint_filename(
@@ -417,6 +548,7 @@ def main(
             )
         else:
             start_step = int(loaded_step)
+            skip_eval_step = int(start_step)
             print(
                 f"[train] Resuming from: {resume_ckpt} (start_step={start_step})",
                 flush=True,
@@ -434,7 +566,13 @@ def main(
         episode_idx: int = 0
         MONITOR.set_episode(episode_idx)
 
-        for step in trange(start_step, total_steps, desc="train"):
+        for step in trange(
+            start_step,
+            total_steps,
+            desc="train",
+            total=int(total_steps),
+            initial=int(start_step),
+        ):
             agent.global_step = int(step)
 
             if (render_every > 0) and ((step % render_every) == 0):
@@ -505,7 +643,11 @@ def main(
                 ep_ret = 0.0
                 ep_len = 0
 
-            if (step > 0) and ((step % eval_every) == 0):
+            if (
+                (step > 0)
+                and ((step % eval_every) == 0)
+                and (skip_eval_step is None or step != skip_eval_step)
+            ):
                 timestamp: str = datetime.now().strftime(format="%H-%M-%S")
                 ckpt_file: str = os.path.join(ckpt_path, f"step_{step}_{timestamp}.pt")
                 agent.save(path=ckpt_file)
@@ -535,6 +677,8 @@ def main(
         viewer.close()
         train_env.close()
         writer.close()
+        if tb_proc is not None:
+            _terminate_process_tree(proc=tb_proc)
 
 
 if __name__ == "__main__":

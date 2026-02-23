@@ -724,20 +724,29 @@ class EnvSpec:
     action_prototypes: list[list[float]]
     obs_h: int
     obs_w: int
+    grayscale: bool = False  # <- NUEVO
 
 
 class PixelObservationWrapper(gym.Wrapper):
-    """Replace vector observation with rendered RGB image."""
+    """Replace vector observation with rendered image (RGB or grayscale)."""
 
-    def __init__(self, env: gym.Env, height: int = 84, width: int = 84) -> None:
+    def __init__(
+        self,
+        env: gym.Env,
+        height: int = 84,
+        width: int = 84,
+        grayscale: bool = False,
+    ) -> None:
         super().__init__(env=env)
         self.height: int = int(height)
         self.width: int = int(width)
+        self.grayscale: bool = bool(grayscale)
 
+        c_out: int = 1 if self.grayscale else 3
         self.observation_space: spaces.Box = spaces.Box(
             low=0,
             high=255,
-            shape=(3, self.height, self.width),
+            shape=(c_out, self.height, self.width),
             dtype=np.uint8,
         )
 
@@ -784,15 +793,22 @@ class PixelObservationWrapper(gym.Wrapper):
         return frame[y0:y1, x0:x1, :]
 
     def _get_obs(self) -> np.ndarray:
-        frame: np.ndarray = self.env.render()
+        frame: np.ndarray = self.env.render()  # (H,W,3) RGB
         frame = self._crop_frame(frame=frame)
         frame = cv2.resize(
             src=frame,
             dsize=(self.width, self.height),
             interpolation=cv2.INTER_AREA,
         )
-        frame = np.transpose(a=frame, axes=(2, 0, 1))
-        return frame.astype(dtype=np.uint8)
+
+        if self.grayscale:
+            # Convert RGB->GRAY, then add channel dim -> (1,H,W)
+            gray: np.ndarray = cv2.cvtColor(src=frame, code=cv2.COLOR_RGB2GRAY)
+            gray_chw: np.ndarray = gray[None, :, :]
+            return gray_chw.astype(dtype=np.uint8)
+
+        frame_chw: np.ndarray = np.transpose(a=frame, axes=(2, 0, 1))
+        return frame_chw.astype(dtype=np.uint8)
 
     def reset(self, **kwargs) -> tuple[np.ndarray, dict]:
         _obs, info = self.env.reset(**kwargs)
@@ -1021,6 +1037,7 @@ def make_env(
         env=env,
         height=int(spec.obs_h),
         width=int(spec.obs_w),
+        grayscale=bool(spec.grayscale),  # <- NUEVO
     )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)
@@ -1063,6 +1080,7 @@ def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
         env=env,
         height=int(spec.obs_h),
         width=int(spec.obs_w),
+        grayscale=bool(spec.grayscale),  # <- NUEVO
     )
 
     prototypes: np.ndarray = np.array(object=spec.action_prototypes, dtype=np.float32)

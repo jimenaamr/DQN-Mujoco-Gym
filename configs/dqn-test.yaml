@@ -13,6 +13,8 @@ env:
   obs_h: 64
   obs_w: 64
 
+  grayscale: false
+
   
   action_prototypes:
 
@@ -50,7 +52,7 @@ env:
 
 
 train:
-  total_steps: 20_000
+  total_steps: 40_000
   learning_starts: 2_000
   train_freq: 4
   batch_size: 32
