@@ -1,5 +1,4 @@
 # src/DQN_walker2d/train.py
-# (ONLY the relevant changed block shown below is NOT acceptable for you, so here is the FULL FILE)
 
 from __future__ import annotations
 
@@ -32,7 +31,6 @@ from tqdm import trange
 
 from src.DQN_walker2d.dqn import DQNAgent, DQNConfig
 from src.DQN_walker2d.env import EnvSpec, make_env
-from src.DQN_walker2d.gui_viewer import TkLiveViewer
 from src.DQN_walker2d.helper import (
     StabilizerConfig,
     resolve_device,
@@ -269,15 +267,6 @@ def _run_eval_in_subprocess(
         return float(raw)
 
 
-def _format_legend_text() -> str:
-    """Build legend text from the global MONITOR.
-
-    Returns:
-        Human-readable debug text for the live viewer overlay.
-    """
-    return MONITOR.to_text().rstrip("\n")
-
-
 def _select_latest_checkpoint(ckpt_dir: Path) -> Path | None:
     """Select the latest checkpoint inside a directory.
 
@@ -370,36 +359,6 @@ def _infer_step_from_checkpoint_filename(ckpt_file: Path) -> int | None:
     if m is None:
         return None
     return int(m.group(1))
-
-
-def _train_visualization_enabled(cfg: dict[str, Any]) -> bool:
-    """Decide whether the training Tk window should be enabled.
-
-    This supports:
-      - train.visualization: bool  (preferred)
-      - train.visualiztion: bool   (backward/typo compatibility)
-      - logging.render_live: bool  (legacy)
-
-    Precedence:
-      train.* overrides logging.*; if none specified, defaults to True.
-
-    Args:
-        cfg: Full experiment config.
-
-    Returns:
-        True if live viewer should be enabled.
-    """
-    t: dict[str, Any] = dict(cfg.get("train", {}))
-    if "visualization" in t:
-        return bool(t.get("visualization"))
-    if "visualiztion" in t:
-        return bool(t.get("visualiztion"))
-
-    logging_cfg: dict[str, Any] = dict(cfg.get("logging", {}))
-    if "render_live" in logging_cfg:
-        return bool(logging_cfg.get("render_live"))
-
-    return True
 
 
 def _is_listening(host: str, port: int) -> bool:
@@ -618,13 +577,13 @@ def main(
         }),
     )
 
-    # --- live_frames export (used by live_visualization.py) ---
+    # --- live_frames export (used by live_visualization.py / live_monitoring.py) ---
     live_enabled: bool = bool(_live_frames_enabled(cfg=cfg))
     live_dir: Path = Path(run_path) / "live_frames"
     current_ep_file: Path = live_dir / "current_episode.txt"
     episode_frame_idx: int = 0
     episode_dir: Path | None = None
-    # ------------------------------------------------------
+    # ---------------------------------------------------------------------------
 
     tb_proc: subprocess.Popen | None = None
     tb_log_path: str = str(Path(run_path) / "tensorboard.log")
@@ -666,17 +625,6 @@ def main(
     log_every: int = int(cfg["logging"]["log_every"])
     eval_every: int = int(cfg["eval"]["every_steps"])
     eval_episodes: int = int(cfg["eval"]["episodes"])
-
-    logging_cfg: dict[str, Any] = dict(cfg.get("logging", {}))
-    render_every: int = int(logging_cfg.get("render_every", 1))
-    has_display: bool = bool(os.environ.get("DISPLAY"))
-
-    render_live: bool = bool(_train_visualization_enabled(cfg=cfg))
-    viewer: TkLiveViewer = TkLiveViewer(
-        enabled=bool(render_live and has_display),
-        title="training_live",
-    )
-    viewer.start()
 
     start_step: int = 0
     skip_eval_step: int | None = None
@@ -739,12 +687,6 @@ def main(
                 global_step=int(step),
                 inner_step=int(ep_len),
             )
-
-            if (render_every > 0) and ((step % render_every) == 0):
-                frame_rgb: np.ndarray = np.ascontiguousarray(
-                    _extract_last_rgb_frame(obs=obs)
-                )
-                viewer.push(frame_rgb=frame_rgb, legend_text=_format_legend_text())
 
             a: int = agent.act(obs=obs, eval_mode=False)
             next_obs, r, terminated, truncated, _ = train_env.step(a)
@@ -858,7 +800,6 @@ def main(
                     agent.save(path=os.path.join(ckpt_path, f"best_{timestamp}.pt"))
 
     finally:
-        viewer.close()
         train_env.close()
         writer.close()
         if tb_proc is not None:
