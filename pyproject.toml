@@ -69,6 +69,7 @@ cuda = [
     "nvidia-cusolver-cu12",
     "nvidia-cusparse-cu12",
     "nvidia-cusparselt-cu12",
+    "nvidia-ml-py3",
     "nvidia-nccl-cu12",
     "nvidia-nvjitlink-cu12",
     "nvidia-nvshmem-cu12",

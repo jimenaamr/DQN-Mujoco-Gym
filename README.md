@@ -44,6 +44,16 @@ python -m src.dqn.train \
 python -m tensorboard.main --logdir runs --port 6006
 ```
 
+
+## Avoid GPU crashing
+
 ```bash
-python -m src.utils.display_metrics Walker2d-v5_20260223_092118
+python -m src.utils.gpu_thermo_guard \
+  --gpu 0 \
+  --high-c 83 \
+  --low-c 77 \
+  --power-normal-w 220 \
+  --power-throttle-w 160 \
+  --poll-s 1.0 \
+  --throttle-min-s 30
 ```
