@@ -8,8 +8,8 @@ env:
   action_repeat: 1
   time_limit: 1000
 
-  obs_h: 40
-  obs_w: 40
+  obs_h: 64
+  obs_w: 64
 
   grayscale: false
 
@@ -38,10 +38,10 @@ env:
   - [+0, +0, -1, +0, +0, +0]
 
   # tobillo + rodilla
-  - [+0, +0, +0, +0, +1, -1]   # lean-forward correction (moderate)
-  - [+0, +0, +0, +0, -1, +1]   # lean-back correction (strong)
-  - [+0, +1, -1, +0, +0, +0]   # lean-forward correction (moderate)
-  - [+0, -1, +1, +0, +0, +0]   # lean-back correction (strong)
+  - [+0, +0, +0, +0, +2, -2]   # lean-forward correction (moderate)
+  - [+0, +0, +0, +0, -2, +2]   # lean-back correction (strong)
+  - [+0, +2, -2, +0, +0, +0]   # lean-forward correction (moderate)
+  - [+0, -2, +2, +0, +0, +0]   # lean-back correction (strong)
 
 
 

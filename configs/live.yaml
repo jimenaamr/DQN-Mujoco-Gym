@@ -1,3 +1,3 @@
-live_dt: 0.01
+live_dt: 0.05  # 0.01
 monitor: "visualization"  # "visualization" / "training"
 # monitor: "training"  # "visualization" / "training"

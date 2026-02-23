@@ -44,6 +44,10 @@ python -m src.dqn.train \
 python -m tensorboard.main --logdir runs --port 6006
 ```
 
+```bash
+python -m src.utils.live_metrics "runs/dqn/Walker2d-v5_20260223_202030"
+```
+
 
 ## Avoid GPU crashing
 

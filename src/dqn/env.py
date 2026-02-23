@@ -11,6 +11,7 @@ import gymnasium as gym
 import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
+
 from src.dqn.helper import HeadStabilizerWrapper, StabilizerConfig
 from src.dqn.reward import walker2d_default_reward
 
@@ -51,6 +52,46 @@ def _maybe_body_x(env: gym.Env, body_name: str) -> float | None:
     except Exception:
         return None
     return x
+
+
+def _maybe_body_pos(env: gym.Env, body_name: str) -> tuple[float, float, float] | None:
+    """Return body (x,y,z) position from MuJoCo if available, else None.
+
+    Args:
+        env: Wrapped Gymnasium environment.
+        body_name: MuJoCo body name.
+
+    Returns:
+        (x, y, z) position of the body frame in world coordinates, or None if
+        unavailable.
+    """
+    base: gym.Env = env.unwrapped
+    model = getattr(base, "model", None)
+    data = getattr(base, "data", None)
+    if model is None or data is None:
+        return None
+
+    body_id: int
+    try:
+        body_id = int(model.body(body_name).id)
+    except Exception:
+        name2id = getattr(model, "name2id", None)
+        if name2id is None:
+            return None
+        try:
+            body_id = int(name2id(body_name, "body"))
+        except Exception:
+            return None
+
+    try:
+        pos = data.xpos[body_id]
+        x: float = float(pos[0])
+        y: float = float(pos[1])
+        z: float = float(pos[2])
+    except Exception:
+        return None
+
+    return (x, y, z)
 
 
 def _maybe_body_speed2d(env: gym.Env, body_name: str) -> float | None:
@@ -215,6 +256,20 @@ def _first_body_x(env: gym.Env, names: Sequence[str]) -> float | None:
     return None
 
 
+def _first_body_pos(
+    env: gym.Env, names: Sequence[str]
+) -> tuple[float, float, float] | None:
+    """Return the first available body position among candidate names."""
+    for name in names:
+        pos: tuple[float, float, float] | None = _maybe_body_pos(
+            env=env,
+            body_name=str(name),
+        )
+        if pos is not None:
+            return pos
+    return None
+
+
 def _first_body_speed2d(env: gym.Env, names: Sequence[str]) -> float | None:
     """Return the first available body planar speed among candidate names."""
     for name in names:
@@ -358,6 +413,16 @@ class PixelObservationWrapper(gym.Wrapper):
         torso_names: tuple[str, ...] = ("torso", "hips", "pelvis")
         x_hips: float | None = _first_body_x(env=self.env, names=torso_names)
         torso_speed: float | None = _first_body_speed2d(env=self.env, names=torso_names)
+        torso_pos: tuple[float, float, float] | None = _first_body_pos(
+            env=self.env,
+            names=torso_names,
+        )
+
+        head_names: tuple[str, ...] = ("head", "neck", "upper_body", "upper")
+        head_pos: tuple[float, float, float] | None = _first_body_pos(
+            env=self.env,
+            names=head_names,
+        )
 
         foot1_geom_candidates: tuple[str, ...] = (
             "foot",
@@ -396,6 +461,13 @@ class PixelObservationWrapper(gym.Wrapper):
             info["x_hips"] = float(x_hips)
         if torso_speed is not None:
             info["torso_speed"] = float(torso_speed)
+
+        if torso_pos is not None:
+            info["z_torso"] = float(torso_pos[2])
+        if head_pos is not None:
+            info["z_head"] = float(head_pos[2])
+        if torso_pos is not None and head_pos is not None:
+            info["head_torso_dz"] = float(head_pos[2] - torso_pos[2])
 
         if foot1_speed2d is not None:
             info["foot1_speed2d"] = float(foot1_speed2d)
