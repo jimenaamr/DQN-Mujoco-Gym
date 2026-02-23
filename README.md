@@ -18,7 +18,7 @@ python -m src.dqn.train --config configs/dqn.yaml
 ```bash
 python -m src.dqn.train \
   --config configs/dqn.yaml \
-  --resume checkpoints/Walker2d-v5_20260218_185009/step_5000000_07-36-34.pt
+  --resume checkpoints/dqn/Walker2d-v5_20260218_185009/step_5000000_07-36-34.pt
 ```
 
 3. Resume from the latest checkpoint of a run **saving videos & checkpoints on the same run directories**:
@@ -26,7 +26,7 @@ python -m src.dqn.train \
 ```bash
 python -m src.dqn.train \
   --config configs/dqn.yaml \
-  --resume checkpoints/Walker2d-v5_20260218_185009/
+  --resume checkpoints/dqn/Walker2d-v5_20260218_185009/
 ```
 
 4. Resume from the latest checkpoint of a run **saving videos & checkpoints on a new run directories**:
@@ -34,7 +34,7 @@ python -m src.dqn.train \
 ```bash
 python -m src.dqn.train \
   --config configs/dqn.yaml \
-  --resume checkpoints/Walker2d-v5_20260218_185009/ \
+  --resume checkpoints/dqn/Walker2d-v5_20260218_185009/ \
   --new-run
 ```
 
