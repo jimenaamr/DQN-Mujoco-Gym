@@ -153,20 +153,16 @@ class NoisyLinear(nn.Module):
 
 
 class _RainbowQNet(nn.Module):
-    """
-    Rainbow CNN Q-network for pixel observations (C,H,W), structured like DQN's _QNet.
+    """Rainbow CNN Q-network for pixel observations (C,H,W), aligned with DQN's _QNet.
 
-    Notes:
-        This mirrors the typical DQN layout:
+    Architecture mirrors your _QNet:
+      - conv stack: 16/32 channels, SiLU activations
+      - flatten
+      - two-layer MLP trunk: 256 -> 64
 
-        - A conv feature extractor (nn.Sequential)
-        - A flatten
-        - A head MLP
-
-        The difference is the output head, which is:
-            - Dueling: value + advantage streams
-            - NoisyLinear: parameterized noise for exploration
-            - Distributional (C51): outputs logits over atoms per action
+    Then it splits into dueling distributional heads (C51) using NoisyLinear:
+      - value head: 64 -> n_atoms
+      - advantage head: 64 -> n_actions * n_atoms
     """
 
     def __init__(
@@ -179,71 +175,59 @@ class _RainbowQNet(nn.Module):
         """Initialize the CNN + dueling distributional heads.
 
         Args:
-            obs_shape: Observation shape (C,H,W).
+            obs_shape: Observation shape as (C, H, W).
             n_actions: Number of discrete actions.
             n_atoms: Number of atoms for C51 distribution.
             noisy_sigma0: Initial sigma for NoisyLinear layers.
         """
         super().__init__()
-        c: int = int(obs_shape[0])
-        h: int = int(obs_shape[1])
-        w: int = int(obs_shape[2])
+        c: int
+        h: int
+        w: int
+        c, h, w = obs_shape
 
         self.n_actions: int = int(n_actions)
         self.n_atoms: int = int(n_atoms)
 
-        # --- Feature extractor (keep structure close to DQN _QNet) ---
-        self.features: nn.Sequential = nn.Sequential(
-            nn.Conv2d(in_channels=c, out_channels=32, kernel_size=8, stride=4),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=4, stride=2),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1),
-            nn.ReLU(inplace=True),
+        # Match _QNet conv stack (channels + activations).
+        self.conv: nn.Sequential = nn.Sequential(
+            nn.Conv2d(in_channels=c, out_channels=16, kernel_size=8, stride=4),
+            nn.SiLU(inplace=False),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2),
+            nn.SiLU(inplace=False),
         )
 
-        feat_dim: int = self._infer_feat_dim(h=h, w=w)
+        with torch.no_grad():
+            dummy: torch.Tensor = torch.zeros(
+                size=(1, int(c), int(h), int(w)),
+                dtype=torch.float32,
+            )
+            out: torch.Tensor = self.conv(dummy)
+            flat_dim: int = int(out.flatten(start_dim=1).shape[1])
 
-        # --- Dueling distributional head (value/adv streams) ---
-        hidden: int = 512
+        # Match _QNet head trunk sizes (256 -> 64), then branch.
+        self.trunk: nn.Sequential = nn.Sequential(
+            nn.Linear(in_features=flat_dim, out_features=256),
+            nn.ReLU(inplace=False),
+            nn.Linear(in_features=256, out_features=64),
+            nn.ReLU(inplace=False),
+        )
 
         self.value: nn.Sequential = nn.Sequential(
-            NoisyLinear(in_features=feat_dim, out_features=hidden, sigma0=noisy_sigma0),
-            nn.ReLU(inplace=True),
-            NoisyLinear(
-                in_features=hidden, out_features=self.n_atoms, sigma0=noisy_sigma0
-            ),
+            NoisyLinear(in_features=64, out_features=64, sigma0=noisy_sigma0),
+            nn.ReLU(inplace=False),
+            NoisyLinear(in_features=64, out_features=self.n_atoms, sigma0=noisy_sigma0),
         )
 
         self.adv: nn.Sequential = nn.Sequential(
-            NoisyLinear(in_features=feat_dim, out_features=hidden, sigma0=noisy_sigma0),
-            nn.ReLU(inplace=True),
+            NoisyLinear(in_features=64, out_features=64, sigma0=noisy_sigma0),
+            nn.ReLU(inplace=False),
             NoisyLinear(
-                in_features=hidden,
+                in_features=64,
                 out_features=self.n_actions * self.n_atoms,
                 sigma0=noisy_sigma0,
             ),
         )
-
-    def _infer_feat_dim(self, h: int, w: int) -> int:
-        """Infer flattened feature dimension by running a dummy tensor through convs.
-
-        Args:
-            h: Input height.
-            w: Input width.
-
-        Returns:
-            Flattened feature dimension after conv stack.
-        """
-        with torch.no_grad():
-            x: torch.Tensor = torch.zeros(
-                1,
-                int(self.features[0].in_channels),  # type: ignore[attr-defined]
-                int(h),
-                int(w),
-            )
-            y: torch.Tensor = self.features(x)
-            return int(y.view(1, -1).shape[1])
 
     def reset_noise(self) -> None:
         """Reset noise in all NoisyLinear layers."""
@@ -251,26 +235,30 @@ class _RainbowQNet(nn.Module):
             if isinstance(m, NoisyLinear):
                 m.reset_noise()
 
-    def forward(self, obs_u8: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Compute distributional logits for each action.
 
         Args:
-            obs_u8: Observations uint8 or float tensor of shape (B,C,H,W).
+            x: (B, C, H, W) uint8 in [0,255] or float.
 
         Returns:
-            Logits tensor of shape (B, n_actions, n_atoms).
+            (B, n_actions, n_atoms) logits.
         """
-        x: torch.Tensor = obs_u8
-        if x.dtype == torch.uint8:
-            x = x.float().div_(255.0)
-        else:
-            x = x.float()
+        if x.dtype is torch.uint8:
+            x = x.to(dtype=torch.float32).mul(1.0 / 255.0)
+        elif x.dtype is not torch.float32:
+            x = x.to(dtype=torch.float32)
 
-        z: torch.Tensor = self.features(x)
-        z = z.view(z.shape[0], -1)
+        if x.is_cuda:
+            x = x.contiguous(memory_format=torch.channels_last)
+
+        y: torch.Tensor = self.conv(x)
+        y = y.flatten(start_dim=1)
+
+        z: torch.Tensor = self.trunk(y)  # (B, 64)
 
         v: torch.Tensor = self.value(z)  # (B, n_atoms)
-        a: torch.Tensor = self.adv(z)  # (B, n_actions*n_atoms)
+        a: torch.Tensor = self.adv(z)  # (B, n_actions * n_atoms)
         a = a.view(z.shape[0], self.n_actions, self.n_atoms)
 
         v = v.view(z.shape[0], 1, self.n_atoms)

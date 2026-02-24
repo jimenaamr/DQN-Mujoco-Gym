@@ -1,151 +1,191 @@
-# src/rdqn/eval.py
+# src/rdqn/monitoring.py
 
 from __future__ import annotations
 
-import argparse
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, SupportsFloat
+from typing import Union
 
-import numpy as np
-import yaml
-from src.rdqn.helper import resolve_device
-
-from src.rdqn.env import EnvSpec, make_eval_env
-from src.rdqn.rdqn import RDQNAgent, RDQNConfig
+MonitorValue = Union[int, float, str]
 
 
-def load_yaml(path: str) -> dict[str, Any]:
-    """Load a YAML file into a Python dictionary.
+def _write_text_atomic(path: Path, text: str) -> None:
+    """Write text to a file atomically.
 
     Args:
-        path: Path to YAML file.
+        path: Destination file path.
+        text: Text to write.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp: Path = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
+def _format_float(v: float) -> str:
+    """Format a float with up to 3 decimals.
+
+    Notes:
+        Uses rounding to 3 decimals, then strips trailing zeros.
+
+    Args:
+        v: Float value.
 
     Returns:
-        Parsed YAML content.
+        A compact string with at most 3 decimal digits.
     """
-    with open(file=path, encoding="utf-8") as f:
-        data: dict[str, Any] = yaml.safe_load(stream=f)
-    return data
+    s: str = f"{float(v):.3f}"
+    if "." in s:
+        s = s.rstrip("0").rstrip(".")
+    return s
 
 
-def _infer_run_name_from_checkpoint(ckpt_path: str) -> str:
-    """Infer run name as the checkpoint parent directory name.
+def _format_value(v: MonitorValue) -> str:
+    """Format a monitor value for display.
 
     Args:
-        ckpt_path: Path to checkpoint file.
+        v: Value to format.
 
     Returns:
-        Inferred run name (fallbacks to "unknown_run" if empty).
+        Display string.
     """
-    p: Path = Path(ckpt_path).expanduser()
-    name: str = p.parent.name
-    return name if name else "unknown_run"
+    if isinstance(v, float):
+        return _format_float(v)
+    return str(v)
 
 
-def main(config_path: str, ckpt_path: str, episodes: int) -> None:
-    """Evaluate a checkpoint and write videos under videos/rdqn/<run_name>/manual_eval.
+def _env_monitor_disabled() -> bool:
+    """Check whether monitoring is disabled via env var.
+
+    Returns:
+        True if DQN_MONITOR_DISABLED is set to a truthy value.
+    """
+    raw: str = str(os.environ.get("DQN_MONITOR_DISABLED", "")).strip().lower()
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+@dataclass
+class MonitoringState:
+    """Mutable monitoring state written by training and read by live_monitoring.
+
+    This is a debugging-oriented key/value store. Training is expected to:
+
+      1) Call begin_step(...) at the beginning of each train loop iteration.
+      2) Call add_field(...) to register additional metrics for that step.
+      3) Optionally call flush(...) to force-write the current state.
+
+    Live monitoring reads a single text file updated atomically each step.
+    """
+
+    _fields: dict[str, MonitorValue] = field(default_factory=dict)
+    _out_path: Path | None = None
+    _active: bool = True
+
+    def __post_init__(self) -> None:
+        """Initialize active state based on environment configuration."""
+        if _env_monitor_disabled():
+            self._active = False
+
+    def activate(self) -> None:
+        """Enable monitoring (add_field/begin_step will write again)."""
+        self._active = True
+
+    def deactivate(self) -> None:
+        """Disable monitoring (add_field/begin_step become no-ops)."""
+        self._active = False
+
+    def set_run_path(self, run_path: Path) -> None:
+        """Configure the output path under a run directory.
+
+        Args:
+            run_path: Path to the run directory.
+        """
+        p: Path = Path(run_path).expanduser().resolve()
+        self._out_path = p / "live_monitoring" / "monitor.txt"
+
+    def clear(self) -> None:
+        """Clear all fields for the next step."""
+        self._fields.clear()
+
+    def add_field(self, name: str, value: MonitorValue) -> None:
+        """Add a new field.
+
+        Args:
+            name: Field name.
+            value: Field value.
+
+        Raises:
+            AssertionError: If the field name already exists in the state.
+        """
+        if not self._active:
+            return
+
+        key: str = str(name)
+        assert key not in self._fields, f"Field already exists: {key}"
+        self._fields[key] = value
+
+    def begin_step(self, episode: int, global_step: int, inner_step: int) -> None:
+        """Reset fields and seed the standard step identifiers.
+
+        Args:
+            episode: Episode index.
+            global_step: Global environment step.
+            inner_step: Step within the current episode.
+        """
+        if not self._active:
+            return
+
+        self.clear()
+        self.add_field(name="episode", value=int(episode))
+        self.add_field(name="global_step", value=int(global_step))
+        self.add_field(name="inner_step", value=int(inner_step))
+        self.flush()
+
+    def to_text(self) -> str:
+        """Render the current fields as text lines.
+
+        Returns:
+            Multi-line text "name: value" in insertion order.
+        """
+        lines: list[str] = []
+        for k, v in self._fields.items():
+            lines.append(f"{k}: {_format_value(v)}")
+        return "\n".join(lines) + "\n"
+
+    def flush(self) -> None:
+        """Atomically write the current state to disk (if configured)."""
+        if not self._active:
+            return
+        if self._out_path is None:
+            return
+        _write_text_atomic(path=self._out_path, text=self.to_text())
+
+
+def add_field(name: str, value: MonitorValue) -> None:
+    """Module-level helper to add a field to the global MONITOR.
 
     Args:
-        config_path: YAML config file.
-        ckpt_path: Checkpoint .pt file.
-        episodes: Number of episodes.
+        name: Field name.
+        value: Field value.
     """
-    cfg: dict[str, Any] = load_yaml(path=config_path)
-    seed: int = int(cfg["seed"])
+    MONITOR.add_field(name=name, value=value)
+    MONITOR.flush()
 
-    e: dict[str, Any] = cfg["env"]
-    env_spec: EnvSpec = EnvSpec(
-        env_id=str(e["env_id"]),
-        frame_stack=int(e["frame_stack"]),
-        action_repeat=int(e["action_repeat"]),
-        time_limit=int(e["time_limit"]),
-        action_prototypes=e["action_prototypes"],
-        obs_h=int(e.get("obs_h", 84)),
-        obs_w=int(e.get("obs_w", 84)),
-        grayscale=bool(e.get("grayscale")),
+
+def begin_step(episode: int, global_step: int, inner_step: int) -> None:
+    """Module-level helper to reset and seed the global MONITOR.
+
+    Args:
+        episode: Episode index.
+        global_step: Global environment step.
+        inner_step: Step within episode.
+    """
+    MONITOR.begin_step(
+        episode=int(episode),
+        global_step=int(global_step),
+        inner_step=int(inner_step),
     )
 
-    run_name: str = _infer_run_name_from_checkpoint(ckpt_path=str(ckpt_path))
-    video_dir: str = str(Path("videos") / "rdqn" / run_name / "manual_eval")
-    env = make_eval_env(spec=env_spec, seed=int(seed + 999), video_dir=str(video_dir))
 
-    t: dict[str, Any] = cfg["train"]
-    ex: dict[str, Any] = dict(cfg.get("exploration", {}))
-    rb: dict[str, Any] = dict(cfg.get("rainbow", {}))
-
-    device_name: str = str(cfg.get("device", "cpu"))
-    device_resolved: str = resolve_device(name=device_name)
-    noisy: bool = bool(rb.get("noisy", True))
-
-    rdqn_cfg: RDQNConfig = RDQNConfig(
-        gamma=float(t["gamma"]),
-        lr=float(t["lr"]),
-        batch_size=int(t["batch_size"]),
-        buffer_size=int(t["buffer_size"]),
-        learning_starts=int(t["learning_starts"]),
-        train_freq=int(t["train_freq"]),
-        target_update_freq=int(t["target_update_freq"]),
-        grad_clip_norm=float(t["grad_clip_norm"]),
-        device=str(device_resolved),
-        eps_start=float(ex.get("eps_start", 1.0)),
-        eps_end=float(ex.get("eps_end", 0.05)),
-        eps_decay_steps=int(ex.get("eps_decay_steps", 200_000)),
-        n_step=int(rb.get("n_step", 3)),
-        per_alpha=float(rb.get("per_alpha", 0.6)),
-        per_beta_start=float(rb.get("per_beta_start", 0.4)),
-        per_beta_frames=int(rb.get("per_beta_frames", 200_000)),
-        use_noisy=bool(noisy),
-        noisy_std_init=float(rb.get("noisy_std_init", 0.5)),
-        atoms=int(rb.get("atoms", 51)),
-        v_min=float(rb.get("v_min", -10.0)),
-        v_max=float(rb.get("v_max", 10.0)),
-    )
-
-    obs_shape_raw: tuple[int, ...] | None = env.observation_space.shape
-    if obs_shape_raw is None or len(obs_shape_raw) != 3:
-        raise ValueError(f"Expected pixel obs shape (C,H,W); got {obs_shape_raw}.")
-    obs_shape: tuple[int, int, int] = (
-        int(obs_shape_raw[0]),
-        int(obs_shape_raw[1]),
-        int(obs_shape_raw[2]),
-    )
-
-    n_actions: int = int(env.action_space.n)
-    agent: RDQNAgent = RDQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=rdqn_cfg)
-    agent.load(path=str(ckpt_path))
-
-    returns: list[float] = []
-    for _ in range(int(episodes)):
-        obs, _ = env.reset()
-        done: bool = False
-        ep_ret: float = 0.0
-        while not done:
-            a: int = agent.act(obs=obs, eval_mode=True)
-            r: SupportsFloat
-            terminated: bool
-            truncated: bool
-            obs, r, terminated, truncated, _ = env.step(action=a)
-            done = bool(terminated or truncated)
-            ep_ret += float(r)
-        returns.append(float(ep_ret))
-
-    print(
-        f"episodes={int(episodes)} "
-        f"mean_return={float(np.mean(a=returns)):.3f} "
-        f"std_return={float(np.std(a=returns)):.3f} "
-        f"video_dir={video_dir}"
-    )
-    env.close()
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/rdqn.yaml")
-    parser.add_argument("--ckpt", type=str, required=True)
-    parser.add_argument("--episodes", type=int, default=10)
-    args: argparse.Namespace = parser.parse_args()
-    main(
-        config_path=str(args.config),
-        ckpt_path=str(args.ckpt),
-        episodes=int(args.episodes),
-    )
+MONITOR: MonitoringState = MonitoringState()

@@ -38,12 +38,14 @@ python -m src.dqn.train \
   --new-run
 ```
 
-## Open tensorboard webpage
+## Monitorize metrics
 
+Open tensorboard:
 ```bash
-python -m tensorboard.main --logdir runs --port 6006
+python -m tensorboard.main --logdir runs/dqn --port 6006
 ```
 
+Open live metrics:
 ```bash
 python -m src.utils.live_metrics "runs/dqn/Walker2d-v5_20260223_202030"
 ```

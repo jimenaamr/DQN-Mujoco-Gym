@@ -1,7 +1,8 @@
-# src/DQN_walker2d/monitoring.py
+# src/dqn/monitoring.py
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Union
@@ -54,6 +55,16 @@ def _format_value(v: MonitorValue) -> str:
     return str(v)
 
 
+def _env_monitor_disabled() -> bool:
+    """Check whether monitoring is disabled via env var.
+
+    Returns:
+        True if DQN_MONITOR_DISABLED is set to a truthy value.
+    """
+    raw: str = str(os.environ.get("DQN_MONITOR_DISABLED", "")).strip().lower()
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
 @dataclass
 class MonitoringState:
     """Mutable monitoring state written by training and read by live_monitoring.
@@ -69,6 +80,20 @@ class MonitoringState:
 
     _fields: dict[str, MonitorValue] = field(default_factory=dict)
     _out_path: Path | None = None
+    _active: bool = True
+
+    def __post_init__(self) -> None:
+        """Initialize active state based on environment configuration."""
+        if _env_monitor_disabled():
+            self._active = False
+
+    def activate(self) -> None:
+        """Enable monitoring (add_field/begin_step will write again)."""
+        self._active = True
+
+    def deactivate(self) -> None:
+        """Disable monitoring (add_field/begin_step become no-ops)."""
+        self._active = False
 
     def set_run_path(self, run_path: Path) -> None:
         """Configure the output path under a run directory.
@@ -84,7 +109,7 @@ class MonitoringState:
         self._fields.clear()
 
     def add_field(self, name: str, value: MonitorValue) -> None:
-        """Add a new field.
+        """Add a new field (if monitoring is active).
 
         Args:
             name: Field name.
@@ -93,6 +118,9 @@ class MonitoringState:
         Raises:
             AssertionError: If the field name already exists in the state.
         """
+        if not self._active:
+            return
+
         key: str = str(name)
         assert key not in self._fields, f"Field already exists: {key}"
         self._fields[key] = value
@@ -105,6 +133,9 @@ class MonitoringState:
             global_step: Global environment step.
             inner_step: Step within the current episode.
         """
+        if not self._active:
+            return
+
         self.clear()
         self.add_field(name="episode", value=int(episode))
         self.add_field(name="global_step", value=int(global_step))
@@ -124,6 +155,8 @@ class MonitoringState:
 
     def flush(self) -> None:
         """Atomically write the current state to disk (if configured)."""
+        if not self._active:
+            return
         if self._out_path is None:
             return
         _write_text_atomic(path=self._out_path, text=self.to_text())

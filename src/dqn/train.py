@@ -277,6 +277,7 @@ def _run_eval_in_subprocess(
         ]
 
         env: dict[str, str] = dict(os.environ)
+        env["DQN_MONITOR_DISABLED"] = "1"
         subprocess.run(args=cmd, check=True, env=env)
 
         with open(file=out_path, encoding="utf-8") as f:
@@ -804,13 +805,17 @@ def main(
                     Path("videos") / "dqn" / str(run_name) / f"step_{int(step)}"
                 )
 
-                eval_ret: float = _run_eval_in_subprocess(
-                    config_path=str(config_path),
-                    checkpoint_path=str(ckpt_file),
-                    seed=int(seed + 123),
-                    episodes=int(eval_episodes),
-                    video_dir=str(video_dir),
-                )
+                MONITOR.deactivate()
+                try:
+                    eval_ret: float = _run_eval_in_subprocess(
+                        config_path=str(config_path),
+                        checkpoint_path=str(ckpt_file),
+                        seed=int(seed + 123),
+                        episodes=int(eval_episodes),
+                        video_dir=str(video_dir),
+                    )
+                finally:
+                    MONITOR.activate()
 
                 writer.add_scalar(
                     tag="eval/return_mean",
