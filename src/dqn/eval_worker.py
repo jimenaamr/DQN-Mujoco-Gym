@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 import yaml
+
 from src.dqn.dqn import DQNAgent, DQNConfig
 from src.dqn.env import EnvSpec, make_eval_env
 from src.dqn.helper import resolve_device
