@@ -29,6 +29,7 @@ import yaml
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
+from src.ablation.rdqn_ablation import RDQNAgent, RDQNConfig
 from src.rdqn.env import EnvSpec, make_env
 from src.rdqn.helper import (
     StabilizerConfig,
@@ -36,27 +37,38 @@ from src.rdqn.helper import (
     stabilizer_config_from_yaml,
 )
 from src.rdqn.monitoring import MONITOR
-from src.ablation.rdqn_ablation import RDQNAgent, RDQNConfig
 
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 _STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
 
 
-def _ensure_rdqn_subdir(root: str) -> str:
-    """Ensure a root directory is namespaced under 'rdqn'.
+def _ensure_rdqn_ablation_subdir(root: str) -> str:
+    """Ensure a root directory is namespaced under 'rdqn-ablation'.
 
-    If root already includes a 'rdqn' path component, it is returned unchanged.
+    Rules:
+      - If 'rdqn-ablation' is already present, return unchanged.
+      - Else if 'rdqn' is present as a path component, replace the last 'rdqn'
+        component with 'rdqn-ablation'.
+      - Else append 'rdqn-ablation'.
 
     Args:
-        root: Base directory (e.g., "runs", "runs/rdqn").
+        root: Base directory (e.g., "runs", "runs/rdqn", "checkpoints/rdqn").
 
     Returns:
-        Directory under the rdqn namespace (e.g., "runs/rdqn").
+        Directory under the rdqn-ablation namespace (e.g., "runs/rdqn-ablation").
     """
     p: Path = Path(root)
-    if "rdqn" in p.parts:
+
+    parts: list[str] = list(p.parts)
+    if "rdqn-ablation" in parts:
         return str(p)
-    return str(p / "rdqn")
+
+    if "rdqn" in parts:
+        idx: int = len(parts) - 1 - parts[::-1].index("rdqn")
+        parts[idx] = "rdqn-ablation"
+        return str(Path(*parts))
+
+    return str(p / "rdqn-ablation")
 
 
 def load_yaml(path: str) -> dict[str, Any]:
@@ -357,7 +369,7 @@ def _infer_run_name_from_checkpoint(ckpt_file: Path) -> str | None:
     """Infer run name from a checkpoint path.
 
     Expected layout:
-        checkpoints/rdqn/<run_name>/<file>.pt
+        checkpoints/rdqn-ablation/<run_name>/<file>.pt
 
     Args:
         ckpt_file: Checkpoint file path.
@@ -516,7 +528,9 @@ def _maybe_env_dt_s(env: Any) -> float | None:
         return None
 
 
-def main(config_path: str, resume_path: str | None = None, new_run: bool = False) -> None:
+def main(
+    config_path: str, resume_path: str | None = None, new_run: bool = False
+) -> None:
     """Entry point for training."""
     cfg: dict[str, Any] = load_yaml(path=config_path)
     seed: int = int(cfg["seed"])
@@ -550,8 +564,8 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
 
     run_dir_raw: str = str(cfg["logging"]["run_dir"])
     ckpt_dir_raw: str = str(cfg["logging"]["ckpt_dir"])
-    run_dir: str = _ensure_rdqn_subdir(root=run_dir_raw)
-    ckpt_dir: str = _ensure_rdqn_subdir(root=ckpt_dir_raw)
+    run_dir: str = _ensure_rdqn_ablation_subdir(root=run_dir_raw)
+    ckpt_dir: str = _ensure_rdqn_ablation_subdir(root=ckpt_dir_raw)
     os.makedirs(name=run_dir, exist_ok=True)
     os.makedirs(name=ckpt_dir, exist_ok=True)
 
@@ -796,7 +810,7 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
                 agent.save(path=ckpt_file)
 
                 video_dir: str = str(
-                    Path("videos") / "rdqn" / str(run_name) / f"step_{int(step)}"
+                    Path("videos") / "rdqn-ablation" / str(run_name) / f"step_{int(step)}"
                 )
 
                 MONITOR.deactivate()
