@@ -55,7 +55,7 @@ train:
 # Rainbow-specific parameters
 rainbow:
   # Ablations
-  use_per: true      # set false to disable PER (uniform replay)
+  use_per: false      # set false to disable PER (uniform replay)
   use_noisy: true    # set false to disable NoisyLinear (use nn.Linear)
 
   # Distributional (C51)

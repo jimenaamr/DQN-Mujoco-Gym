@@ -40,7 +40,7 @@ def walker2d_default_reward(
     r -= ctrl_cost
 
     r += 0.10 * float(np.clip(torso_speed, 0.0, 4.0))
-    r += 0.20 * float(np.clip(feet_dist, 0.0, 2.0))
+    r += 0.10 * float(np.clip(feet_dist, 0.0, 2.0))
 
     z_torso: float = float(info.get("z_torso", 0.0))
     torso_height_offset: float = 1.1
