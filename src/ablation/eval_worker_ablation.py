@@ -50,44 +50,16 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
 
 
 def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
-    """Convert the config into an RDQNConfig for evaluation.
+    """Convert YAML config into RDQNConfig (including ablation toggles)."""
 
-    Args:
-        cfg: Full experiment configuration.
-
-    Returns:
-        Parsed RDQNConfig.
-    """
     t: dict[str, Any] = cfg["train"]
-    rb: dict[str, Any] = dict(cfg.get("rainbow", {}))  # Ablation
+    r: dict[str, Any] = dict(cfg.get("rainbow", {}))
 
     device_name: str = str(cfg.get("device", "cpu"))
     device_resolved: str = resolve_device(name=device_name)
 
-    # --- Ablation toggles (read from YAML) ---
-    use_per: bool = bool(rb.get("use_per", True))  # Ablation
-    use_noisy: bool = bool(rb.get("use_noisy", True))  # Ablation
-
-    # --- Backward-compatible key aliases (support older configs too) ---
-    prio_alpha: float = float(
-        rb.get("prio_alpha", rb.get("per_alpha", 0.6))
-    )  # Ablation
-    prio_beta_start: float = float(  # Ablation
-        rb.get("prio_beta_start", rb.get("per_beta_start", 0.4))
-    )
-    prio_beta_end: float = float(  # Ablation
-        rb.get("prio_beta_end", rb.get("per_beta_end", 1.0))
-    )
-    prio_beta_steps: int = int(  # Ablation
-        rb.get("prio_beta_steps", rb.get("per_beta_frames", 200_000))
-    )
-    prio_eps: float = float(rb.get("prio_eps", rb.get("per_eps", 1.0e-6)))  # Ablation
-
-    noisy_sigma0: float = float(  # Ablation
-        rb.get("noisy_sigma0", rb.get("noisy_std_init", 0.5))
-    )
-
-    n_atoms: int = int(rb.get("n_atoms", rb.get("atoms", 51)))  # Ablation
+    use_per: bool = bool(r.get("use_per", True))
+    use_noisy: bool = bool(r.get("use_noisy", True))
 
     return RDQNConfig(
         gamma=float(t["gamma"]),
@@ -98,20 +70,20 @@ def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
         train_freq=int(t["train_freq"]),
         target_update_freq=int(t["target_update_freq"]),
         grad_clip_norm=float(t["grad_clip_norm"]),
-        # Rainbow params
-        noisy_sigma0=float(noisy_sigma0),  # Ablation
-        n_step=int(rb.get("n_step", 3)),
-        prio_alpha=float(prio_alpha),  # Ablation
-        prio_beta_start=float(prio_beta_start),  # Ablation
-        prio_beta_end=float(prio_beta_end),  # Ablation
-        prio_beta_steps=int(prio_beta_steps),  # Ablation
-        prio_eps=float(prio_eps),  # Ablation
-        v_min=float(rb.get("v_min", -10.0)),
-        v_max=float(rb.get("v_max", 10.0)),
-        n_atoms=int(n_atoms),  # Ablation
-        # Ablation toggles
-        use_per=bool(use_per),  # Ablation
-        use_noisy=bool(use_noisy),  # Ablation
+        # Rainbow-specific
+        noisy_sigma0=float(r.get("noisy_sigma0", 0.5)),
+        n_step=int(r.get("n_step", 3)),
+        prio_alpha=float(r.get("prio_alpha", 0.6)),
+        prio_beta_start=float(r.get("prio_beta_start", 0.4)),
+        prio_beta_end=float(r.get("prio_beta_end", 1.0)),
+        prio_beta_steps=int(r.get("prio_beta_steps", 1_000_000)),
+        prio_eps=float(r.get("prio_eps", 1.0e-6)),
+        v_min=float(r.get("v_min", -10.0)),
+        v_max=float(r.get("v_max", 10.0)),
+        n_atoms=int(r.get("n_atoms", 51)),
+        # Ablations
+        use_per=bool(use_per),
+        use_noisy=bool(use_noisy),
         device=str(device_resolved),
     )
 

@@ -7,9 +7,9 @@ from typing import Any
 
 import numpy as np
 import yaml
-from src.rdqn.helper import resolve_device
 
 from src.rdqn.env import EnvSpec, make_eval_env
+from src.rdqn.helper import resolve_device
 from src.rdqn.rdqn import RDQNAgent, RDQNConfig
 
 
@@ -49,23 +49,57 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
     )
 
 
+# def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
+#     """Convert the config into an RDQNConfig for evaluation.
+
+#     Args:
+#         cfg: Full experiment configuration.
+
+#     Returns:
+#         Parsed RDQNConfig.
+#     """
+#     t: dict[str, Any] = cfg["train"]
+#     ex: dict[str, Any] = dict(cfg.get("exploration", {}))
+#     rb: dict[str, Any] = dict(cfg.get("rainbow", {}))
+
+#     device_name: str = str(cfg.get("device", "cpu"))
+#     device_resolved: str = resolve_device(name=device_name)
+
+#     noisy: bool = bool(rb.get("noisy", True))
+
+#     return RDQNConfig(
+#         gamma=float(t["gamma"]),
+#         lr=float(t["lr"]),
+#         batch_size=int(t["batch_size"]),
+#         buffer_size=int(t["buffer_size"]),
+#         learning_starts=int(t["learning_starts"]),
+#         train_freq=int(t["train_freq"]),
+#         target_update_freq=int(t["target_update_freq"]),
+#         grad_clip_norm=float(t["grad_clip_norm"]),
+#         device=str(device_resolved),
+#         eps_start=float(ex.get("eps_start", 1.0)),
+#         eps_end=float(ex.get("eps_end", 0.05)),
+#         eps_decay_steps=int(ex.get("eps_decay_steps", 200_000)),
+#         n_step=int(rb.get("n_step", 3)),
+#         per_alpha=float(rb.get("per_alpha", 0.6)),
+#         per_beta_start=float(rb.get("per_beta_start", 0.4)),
+#         per_beta_frames=int(rb.get("per_beta_frames", 200_000)),
+#         use_noisy=bool(noisy),
+#         noisy_std_init=float(rb.get("noisy_std_init", 0.5)),
+#         atoms=int(rb.get("atoms", 51)),
+#         v_min=float(rb.get("v_min", -10.0)),
+#         v_max=float(rb.get("v_max", 10.0)),
+#     )
+
+
 def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
-    """Convert the config into an RDQNConfig for evaluation.
+    """Convert YAML config into RDQNConfig."""
 
-    Args:
-        cfg: Full experiment configuration.
-
-    Returns:
-        Parsed RDQNConfig.
-    """
     t: dict[str, Any] = cfg["train"]
-    ex: dict[str, Any] = dict(cfg.get("exploration", {}))
-    rb: dict[str, Any] = dict(cfg.get("rainbow", {}))
+    r: dict[str, Any] = cfg["rainbow"]
 
     device_name: str = str(cfg.get("device", "cpu"))
     device_resolved: str = resolve_device(name=device_name)
-
-    noisy: bool = bool(rb.get("noisy", True))
 
     return RDQNConfig(
         gamma=float(t["gamma"]),
@@ -76,19 +110,18 @@ def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
         train_freq=int(t["train_freq"]),
         target_update_freq=int(t["target_update_freq"]),
         grad_clip_norm=float(t["grad_clip_norm"]),
+        # Rainbow-specific
+        noisy_sigma0=float(r["noisy_sigma0"]),
+        n_step=int(r["n_step"]),
+        prio_alpha=float(r["prio_alpha"]),
+        prio_beta_start=float(r["prio_beta_start"]),
+        prio_beta_end=float(r["prio_beta_end"]),
+        prio_beta_steps=int(r["prio_beta_steps"]),
+        prio_eps=float(r["prio_eps"]),
+        v_min=float(r["v_min"]),
+        v_max=float(r["v_max"]),
+        n_atoms=int(r["n_atoms"]),
         device=str(device_resolved),
-        eps_start=float(ex.get("eps_start", 1.0)),
-        eps_end=float(ex.get("eps_end", 0.05)),
-        eps_decay_steps=int(ex.get("eps_decay_steps", 200_000)),
-        n_step=int(rb.get("n_step", 3)),
-        per_alpha=float(rb.get("per_alpha", 0.6)),
-        per_beta_start=float(rb.get("per_beta_start", 0.4)),
-        per_beta_frames=int(rb.get("per_beta_frames", 200_000)),
-        use_noisy=bool(noisy),
-        noisy_std_init=float(rb.get("noisy_std_init", 0.5)),
-        atoms=int(rb.get("atoms", 51)),
-        v_min=float(rb.get("v_min", -10.0)),
-        v_max=float(rb.get("v_max", 10.0)),
     )
 
 
