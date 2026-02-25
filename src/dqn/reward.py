@@ -41,7 +41,7 @@ def walker2d_default_reward(
 
     # Speed + stride-ish shaping (your previous terms).
     r += 0.10 * float(np.clip(torso_speed, 0.0, 4.0))
-    r += 0.10 * float(np.clip(feet_dist, 0.0, 2.0))
+    r += 0.20 * float(np.clip(feet_dist, 0.0, 2.0)) - 0.10
 
     # Torso height shaping: reward being above an offset baseline.
     z_torso: float = float(info.get("z_torso", 0.0))
@@ -60,7 +60,7 @@ def walker2d_default_reward(
     MONITOR.add_field(name="feet_dist", value=feet_dist)
     MONITOR.add_field(
         name="capped_weighted_feet_dist",
-        value=0.20 * float(np.clip(feet_dist, 0.0, 2.0)),
+        value=0.20 * float(np.clip(feet_dist, 0.0, 2.0)) - 0.10,
     )
     MONITOR.add_field(name="z_torso", value=z_torso)
     MONITOR.add_field(name="torso_height_offset", value=torso_height_offset)
