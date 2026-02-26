@@ -484,6 +484,11 @@ def main(
     rdqn_cfg: RDQNConfig = to_rdqn_cfg(cfg=cfg)
     agent: RDQNAgent = RDQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=rdqn_cfg)
 
+    # --- FIX: make sure we start training mode (act() will manage modes per call) ---
+    agent.q.train()
+    agent.q_targ.eval()
+    # ------------------------------------------------------------------------------
+
     device_raw: str = str(cfg.get("device", "cpu"))
     print(
         f"[train] device config: {device_raw} -> resolved: {rdqn_cfg.device}",
@@ -641,7 +646,9 @@ def main(
                 inner_step=int(ep_len),
             )
 
+            # act() FIX lives in RDQNAgent.act(): it now sets train/eval correctly.
             a: int = agent.act(obs=obs, eval_mode=False)
+
             next_obs, r, terminated, truncated, _ = train_env.step(a)
             done: bool = bool(terminated or truncated)
 

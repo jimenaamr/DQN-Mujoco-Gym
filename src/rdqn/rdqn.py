@@ -493,21 +493,26 @@ class RDQNAgent:
         Returns:
             Discrete action index.
         """
-        self.q.eval()
+        # --- FIX 1: set mode properly ---
         if eval_mode:
-            # In eval, we still compute deterministically; NoisyLinear still has
-            # fixed sampled eps buffers. We reset noise less frequently by not
-            # calling reset_noise here.
-            pass
+            self.q.eval()
         else:
+            self.q.train()
+        # -------------------------------
+
+        # --- FIX 2: noise handling ---
+        # Train: resample noise every action (standard for NoisyNets exploration).
+        # Eval: keep noise fixed/deterministic (do NOT reset here).
+        if not eval_mode:
             self.q.reset_noise()
+        # -----------------------------
 
         obs_t: torch.Tensor = torch.from_numpy(obs[None, ...]).to(self.device)
         logits: torch.Tensor = self.q(obs_t)  # (1,A,Z)
         prob: torch.Tensor = F.softmax(logits, dim=-1)
         q_values: torch.Tensor = torch.sum(prob * self.support.view(1, 1, -1), dim=-1)
         a: int = int(torch.argmax(q_values, dim=1).item())
-        self.q.train()
+
         return a
 
     def store(
