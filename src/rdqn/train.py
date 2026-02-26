@@ -15,7 +15,6 @@ import re
 import signal
 import socket
 import subprocess
-import sys
 import tempfile
 import time
 from argparse import Namespace
@@ -37,6 +36,7 @@ from src.rdqn.helper import (
 )
 from src.rdqn.monitoring import MONITOR
 from src.rdqn.rdqn import RDQNAgent, RDQNConfig
+from src.utils.tensorboard import launch_tensorboard
 
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 _STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
@@ -398,73 +398,6 @@ def _is_listening(host: str, port: int) -> bool:
         s.close()
 
 
-def _launch_tensorboard(
-    run_dir: str,
-    run_name: str,
-    tb_log_path: str,
-) -> subprocess.Popen | None:
-    """Launch TensorBoard non-blocking using the current Python environment.
-
-    Args:
-        run_dir: Root directory containing all runs.
-        run_name: Current run name (for display only).
-        tb_log_path: File path to write TensorBoard stdout/stderr.
-
-    Returns:
-        The Popen handle if started, else None.
-    """
-    port_raw: str = str(os.environ.get(key="TENSORBOARD_PORT", default="6006"))
-    try:
-        port: int = int(port_raw)
-    except ValueError:
-        port = 6006
-
-    cmd: list[str] = [
-        str(sys.executable),
-        "-m",
-        "tensorboard.main",
-        "--logdir",
-        str(run_dir),
-        "--port",
-        str(int(port)),
-        "--bind_all",
-    ]
-
-    tb_log_file = open(file=tb_log_path, mode="w", encoding="utf-8")
-
-    try:
-        proc: subprocess.Popen = subprocess.Popen(
-            args=cmd,
-            stdout=tb_log_file,
-            stderr=subprocess.STDOUT,
-            env=dict(os.environ),
-            start_new_session=True,
-        )
-    except Exception:
-        tb_log_file.close()
-        return None
-
-    deadline_s: float = time.time() + 3.0
-    while time.time() < deadline_s:
-        if proc.poll() is not None:
-            break
-        if _is_listening(host="127.0.0.1", port=int(port)):
-            break
-        time.sleep(0.05)
-
-    url: str = f"http://localhost:{int(port)}/"
-
-    if _is_listening(host="127.0.0.1", port=int(port)):
-        print(f"[train] TensorBoard: {url} (run: {run_name})", flush=True)
-        return proc
-
-    print(
-        f"[train] WARNING: TensorBoard failed to start. See log: {tb_log_path}",
-        flush=True,
-    )
-    return proc
-
-
 def _terminate_process_tree(proc: subprocess.Popen) -> None:
     """Terminate a subprocess (and its process group) best-effort.
 
@@ -609,7 +542,7 @@ def main(
 
     tb_proc: subprocess.Popen | None = None
     tb_log_path: str = str(Path(run_path) / "tensorboard.log")
-    tb_proc = _launch_tensorboard(
+    tb_proc = launch_tensorboard(
         run_dir=str(run_dir),
         run_name=str(run_name),
         tb_log_path=str(tb_log_path),
