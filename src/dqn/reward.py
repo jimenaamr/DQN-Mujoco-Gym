@@ -40,13 +40,15 @@ def walker2d_default_reward(
     r -= ctrl_cost
 
     # Speed + stride-ish shaping (your previous terms).
-    r += 0.10 * float(np.clip(torso_speed, 0.0, 4.0))
-    r += 0.20 * float(np.clip(feet_dist, 0.0, 2.0)) - 0.10
+    r += 0.10 * float(np.clip(a=torso_speed, a_min=0.0, a_max=4.0))
+    r += 0.10 * float(np.clip(a=feet_dist, a_min=0.0, a_max=2.0) - 1.0)
 
     # Torso height shaping: reward being above an offset baseline.
     z_torso: float = float(info.get("z_torso", 0.0))
-    torso_height_offset: float = 1.1
-    torso_height_term: float = float(z_torso - torso_height_offset)
+    torso_height_offset: float = 1.05
+    torso_height_term: float = float(
+        np.clip(a=(z_torso - torso_height_offset), a_min=-1.0, a_max=0.0)
+    )
     r += 0.10 * torso_height_term
 
     if not (terminated or truncated):
@@ -55,18 +57,18 @@ def walker2d_default_reward(
     MONITOR.add_field(name="torso_speed", value=torso_speed)
     MONITOR.add_field(
         name="capped_weighted_torso_speed",
-        value=0.10 * float(np.clip(torso_speed, 0.0, 4.0)),
+        value=0.10 * float(np.clip(a=torso_speed, a_min=0.0, a_max=4.0)),
     )
     MONITOR.add_field(name="feet_dist", value=feet_dist)
     MONITOR.add_field(
         name="capped_weighted_feet_dist",
-        value=0.20 * float(np.clip(feet_dist, 0.0, 2.0)) - 0.10,
+        value=0.10 * float(np.clip(a=feet_dist, a_min=0.0, a_max=2.0) - 1.0),
     )
     MONITOR.add_field(name="z_torso", value=z_torso)
     MONITOR.add_field(name="torso_height_offset", value=torso_height_offset)
     MONITOR.add_field(name="torso_height_term", value=torso_height_term)
     MONITOR.add_field(
-        name="capped_weighted_torso_height_term",
+        name="weighted_torso_height_term",
         value=0.10 * torso_height_term,
     )
 
