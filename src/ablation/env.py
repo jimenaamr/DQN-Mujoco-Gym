@@ -1,4 +1,4 @@
-# src/ablation/env.py
+# src/dqn/env.py
 
 from __future__ import annotations
 
@@ -12,125 +12,90 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
 
-from src.rdqn.helper import HeadStabilizerWrapper, StabilizerConfig
-from src.rdqn.reward import walker2d_default_reward
+from src.ablation.helper import HeadStabilizerWrapper, StabilizerConfig
+from src.ablation.reward import walker2d_default_reward
 
 # CROPS = (top, bottom, left, right)  # fractions of each border to crop (e.g., 0.10 = 10%)
 CROPS: tuple[float, float, float, float] = (0.25, 0.05, 0.1, 0.1)
 
 
-def _maybe_body_x(env: gym.Env, body_name: str) -> float | None:
-    """Return body x-position from MuJoCo if available, else None.
+# ------------------------- MuJoCo position/velocity retrieval -------------------------
 
-    Args:
-        env: Wrapped Gymnasium environment.
-        body_name: MuJoCo body name.
 
-    Returns:
-        X-position of the body frame in world coordinates, or None if unavailable.
-    """
+def _mujoco_model_data(env: gym.Env) -> tuple[object, object] | None:
+    """Return (model, data) from unwrapped env if MuJoCo-backed, else None."""
     base: gym.Env = env.unwrapped
-    model = getattr(base, "model", None)
-    data = getattr(base, "data", None)
+    model: object | None = getattr(base, "model", None)
+    data: object | None = getattr(base, "data", None)
     if model is None or data is None:
         return None
+    return (model, data)
 
-    body_id: int
+
+def _mujoco_id(model: object, name: str, kind: str) -> int | None:
+    """Resolve a MuJoCo object id (body/geom/site/joint) by name, or None."""
     try:
-        body_id = int(model.body(body_name).id)
+        if kind == "body":
+            return int(model.body(name).id)  # type: ignore[misc]
+        if kind == "geom":
+            return int(model.geom(name).id)  # type: ignore[misc]
+        if kind == "site":
+            return int(model.site(name).id)  # type: ignore[misc]
+        if kind == "joint":
+            return int(model.joint(name).id)  # type: ignore[misc]
+        return None
     except Exception:
         name2id = getattr(model, "name2id", None)
         if name2id is None:
             return None
         try:
-            body_id = int(name2id(body_name, "body"))
+            return int(name2id(name, kind))
         except Exception:
             return None
 
+
+def _first_id(model: object, names: Sequence[str], kind: str) -> int | None:
+    """Return first resolvable id for the given MuJoCo object kind."""
+    for n in names:
+        i: int | None = _mujoco_id(model=model, name=str(n), kind=kind)
+        if i is not None:
+            return int(i)
+    return None
+
+
+def _pos3(arr: object, idx: int) -> tuple[float, float, float] | None:
+    """Return (x,y,z) from arr[idx], or None if unavailable."""
     try:
-        x: float = float(data.xpos[body_id][0])
-    except Exception:
-        return None
-    return x
-
-
-def _maybe_body_pos(env: gym.Env, body_name: str) -> tuple[float, float, float] | None:
-    """Return body (x,y,z) position from MuJoCo if available, else None.
-
-    Args:
-        env: Wrapped Gymnasium environment.
-        body_name: MuJoCo body name.
-
-    Returns:
-        (x, y, z) position of the body frame in world coordinates, or None if
-        unavailable.
-    """
-    base: gym.Env = env.unwrapped
-    model = getattr(base, "model", None)
-    data = getattr(base, "data", None)
-    if model is None or data is None:
-        return None
-
-    body_id: int
-    try:
-        body_id = int(model.body(body_name).id)
-    except Exception:
-        name2id = getattr(model, "name2id", None)
-        if name2id is None:
-            return None
-        try:
-            body_id = int(name2id(body_name, "body"))
-        except Exception:
-            return None
-
-    try:
-        pos = data.xpos[body_id]
-        x: float = float(pos[0])
-        y: float = float(pos[1])
-        z: float = float(pos[2])
+        p = arr[idx]
+        return (float(p[0]), float(p[1]), float(p[2]))
     except Exception:
         return None
 
-    return (x, y, z)
 
-
-def _maybe_body_speed2d(env: gym.Env, body_name: str) -> float | None:
-    """Return body planar (x,y) speed from MuJoCo if available, else None.
-
-    Args:
-        env: Wrapped Gymnasium environment.
-        body_name: MuJoCo body name.
-
-    Returns:
-        Speed in the horizontal plane (sqrt(vx^2 + vy^2)), or None if unavailable.
-    """
-    base: gym.Env = env.unwrapped
-    model = getattr(base, "model", None)
-    data = getattr(base, "data", None)
-    if model is None or data is None:
+def _body_x(data: object, body_id: int) -> float | None:
+    """Return body x-position, or None if unavailable."""
+    try:
+        return float(data.xpos[body_id][0])
+    except Exception:
         return None
 
-    body_id: int
-    try:
-        body_id = int(model.body(body_name).id)
-    except Exception:
-        name2id = getattr(model, "name2id", None)
-        if name2id is None:
-            return None
-        try:
-            body_id = int(name2id(body_name, "body"))
-        except Exception:
-            return None
 
+def _obj_speed2d(model: object, data: object, kind: str, obj_id: int) -> float | None:
+    """Return planar speed for MuJoCo body/geom, or None if not available."""
     try:
         import mujoco  # type: ignore
 
         vel6: np.ndarray = np.zeros(shape=(6,), dtype=np.float64)
+        mjtobj = (
+            mujoco.mjtObj.mjOBJ_BODY  # type: ignore[attr-defined]
+            if kind == "body"
+            else mujoco.mjtObj.mjOBJ_GEOM  # type: ignore[attr-defined]
+        )
         mujoco.mj_objectVelocity(  # type: ignore[attr-defined]
             model,
             data,
-            mujoco.mjtObj.mjOBJ_BODY,  # type: ignore[attr-defined]
-            int(body_id),
+            mjtobj,
+            int(obj_id),
             vel6,
             0,
         )
@@ -141,7 +106,10 @@ def _maybe_body_speed2d(env: gym.Env, body_name: str) -> float | None:
         pass
 
     try:
-        v = data.xvelp[body_id]
+        if kind == "body":
+            v = data.xvelp[obj_id]
+        else:
+            v = data.geom_xvelp[obj_id]
         vx_f: float = float(v[0])
         vy_f: float = float(v[1])
         return float(sqrt(vx_f * vx_f + vy_f * vy_f))
@@ -149,153 +117,464 @@ def _maybe_body_speed2d(env: gym.Env, body_name: str) -> float | None:
         return None
 
 
-def _maybe_geom_pos(env: gym.Env, geom_name: str) -> tuple[float, float, float] | None:
-    """Return geom (x,y,z) position from MuJoCo if available, else None.
-
-    Args:
-        env: Wrapped Gymnasium environment.
-        geom_name: MuJoCo geom name.
-
-    Returns:
-        (x, y, z) position of the geom in world coordinates, or None if unavailable.
-    """
-    base: gym.Env = env.unwrapped
-    model = getattr(base, "model", None)
-    data = getattr(base, "data", None)
-    if model is None or data is None:
+def _effective_dt(env: gym.Env, info: dict) -> float | None:
+    """Return effective dt for this wrapper step (accounts for ActionRepeat)."""
+    md: tuple[object, object] | None = _mujoco_model_data(env=env)
+    if md is None:
         return None
-
-    geom_id: int
+    model, _data = md
     try:
-        geom_id = int(model.geom(geom_name).id)
-    except Exception:
-        name2id = getattr(model, "name2id", None)
-        if name2id is None:
-            return None
-        try:
-            geom_id = int(name2id(geom_name, "geom"))
-        except Exception:
-            return None
-
-    try:
-        pos = data.geom_xpos[geom_id]
-        x: float = float(pos[0])
-        y: float = float(pos[1])
-        z: float = float(pos[2])
+        base_dt: float = float(model.opt.timestep)
     except Exception:
         return None
+    repeat: int = int(info.get("action_repeat", 1))
+    return float(base_dt * float(repeat))
 
-    return (x, y, z)
+
+def _sanitize_name(name: str) -> str:
+    """Make MuJoCo names safe for info keys."""
+    return str(name).strip().replace(" ", "_")
 
 
-def _maybe_geom_speed2d(env: gym.Env, geom_name: str) -> float | None:
-    """Return geom planar (x,y) speed from MuJoCo if available, else None.
-
-    Args:
-        env: Wrapped Gymnasium environment.
-        geom_name: MuJoCo geom name.
-
-    Returns:
-        Speed in the horizontal plane (sqrt(vx^2 + vy^2)), or None if unavailable.
-    """
-    base: gym.Env = env.unwrapped
-    model = getattr(base, "model", None)
-    data = getattr(base, "data", None)
-    if model is None or data is None:
-        return None
-
-    geom_id: int
+def _joint_names(model: object) -> list[str]:
+    """Return a list of joint names from the MuJoCo model (best-effort)."""
+    names: list[str] = []
     try:
-        geom_id = int(model.geom(geom_name).id)
+        njnt: int = int(model.njnt)
     except Exception:
-        name2id = getattr(model, "name2id", None)
-        if name2id is None:
-            return None
-        try:
-            geom_id = int(name2id(geom_name, "geom"))
-        except Exception:
-            return None
+        return names
 
     try:
-        import mujoco  # type: ignore
-
-        vel6: np.ndarray = np.zeros(shape=(6,), dtype=np.float64)
-        mujoco.mj_objectVelocity(  # type: ignore[attr-defined]
-            model,
-            data,
-            mujoco.mjtObj.mjOBJ_GEOM,  # type: ignore[attr-defined]
-            int(geom_id),
-            vel6,
-            0,
-        )
-        vx: float = float(vel6[0])
-        vy: float = float(vel6[1])
-        return float(sqrt(vx * vx + vy * vy))
+        joint_fn = model.joint
+        for j in range(njnt):
+            try:
+                nm: str = str(joint_fn(j).name)
+                if nm:
+                    names.append(_sanitize_name(name=nm))
+            except Exception:
+                continue
+        if names:
+            return names
     except Exception:
         pass
 
     try:
-        v = data.geom_xvelp[geom_id]
-        vx_f: float = float(v[0])
-        vy_f: float = float(v[1])
-        return float(sqrt(vx_f * vx_f + vy_f * vy_f))
+        import mujoco  # type: ignore
+
+        for j in range(njnt):
+            try:
+                nm2: str | None = mujoco.mj_id2name(  # type: ignore[attr-defined]
+                    model,
+                    mujoco.mjtObj.mjOBJ_JOINT,  # type: ignore[attr-defined]
+                    int(j),
+                )
+                if nm2:
+                    names.append(_sanitize_name(name=str(nm2)))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return names
+
+
+# ------------------------- Terminal points via geom extrema -------------------------
+
+
+def _geom_rot_z_axis(data: object, geom_id: int) -> np.ndarray | None:
+    """Return geom local z-axis in world coordinates (3,), or None."""
+    try:
+        xmat = np.asarray(data.geom_xmat[geom_id], dtype=np.float64).reshape(3, 3)
+        return xmat[:, 2].copy()
     except Exception:
         return None
 
 
-def _first_body_x(env: gym.Env, names: Sequence[str]) -> float | None:
-    """Return the first available body x-position among candidate names."""
-    for name in names:
-        x: float | None = _maybe_body_x(env=env, body_name=str(name))
-        if x is not None:
-            return float(x)
-    return None
+def _geom_center(data: object, geom_id: int) -> np.ndarray | None:
+    """Return geom center in world coordinates (3,), or None."""
+    try:
+        return np.asarray(data.geom_xpos[geom_id], dtype=np.float64).copy()
+    except Exception:
+        return None
 
 
-def _first_body_pos(
-    env: gym.Env, names: Sequence[str]
-) -> tuple[float, float, float] | None:
-    """Return the first available body position among candidate names."""
-    for name in names:
-        pos: tuple[float, float, float] | None = _maybe_body_pos(
-            env=env,
-            body_name=str(name),
+def _geom_size(model: object, geom_id: int) -> np.ndarray | None:
+    """Return geom size (3,), or None."""
+    try:
+        return np.asarray(model.geom_size[geom_id], dtype=np.float64).copy()
+    except Exception:
+        return None
+
+
+def _geom_type(model: object, geom_id: int) -> int | None:
+    """Return geom type int, or None."""
+    try:
+        return int(model.geom_type[geom_id])
+    except Exception:
+        return None
+
+
+def _geom_extreme_points(model: object, data: object, geom_id: int) -> list[np.ndarray]:
+    """Return a small set of world points spanning the geom (best-effort)."""
+    c: np.ndarray | None = _geom_center(data=data, geom_id=geom_id)
+    if c is None:
+        return []
+
+    gsize: np.ndarray | None = _geom_size(model=model, geom_id=geom_id)
+    gtype: int | None = _geom_type(model=model, geom_id=geom_id)
+
+    # If we can't reason about shape, use center only.
+    if gsize is None or gtype is None:
+        return [c]
+
+    # Try to map mujoco enums; if unavailable, fall back to heuristic by value.
+    try:
+        import mujoco  # type: ignore
+
+        mj_capsule: int = int(mujoco.mjtGeom.mjGEOM_CAPSULE)  # type: ignore[attr-defined]
+        mj_cyl: int = int(mujoco.mjtGeom.mjGEOM_CYLINDER)  # type: ignore[attr-defined]
+        mj_box: int = int(mujoco.mjtGeom.mjGEOM_BOX)  # type: ignore[attr-defined]
+        mj_sphere: int = int(mujoco.mjtGeom.mjGEOM_SPHERE)  # type: ignore[attr-defined]
+        mj_plane: int = int(mujoco.mjtGeom.mjGEOM_PLANE)  # type: ignore[attr-defined]
+    except Exception:
+        mj_capsule, mj_cyl, mj_box, mj_sphere, mj_plane = -1, -1, -1, -1, -1
+
+    if gtype == mj_plane:
+        return []
+
+    # Capsule / cylinder: endpoints along local z axis.
+    if gtype == mj_capsule or gtype == mj_cyl:
+        axis_z: np.ndarray | None = _geom_rot_z_axis(data=data, geom_id=geom_id)
+        if axis_z is None:
+            return [c]
+
+        radius: float = float(gsize[0])
+        half_len: float = float(gsize[1])
+
+        # Capsule extends by radius beyond the cylinder half-length.
+        half_extent: float = float(half_len + (radius if gtype == mj_capsule else 0.0))
+        d: np.ndarray = axis_z * float(half_extent)
+        return [c - d, c + d]
+
+    # Box: sample 8 corners (local frame) -> world via xmat.
+    if gtype == mj_box:
+        try:
+            xmat = np.asarray(data.geom_xmat[geom_id], dtype=np.float64).reshape(3, 3)
+        except Exception:
+            return [c]
+
+        sx: float = float(gsize[0])
+        sy: float = float(gsize[1])
+        sz: float = float(gsize[2])
+
+        pts: list[np.ndarray] = []
+        for dx in (-sx, sx):
+            for dy in (-sy, sy):
+                for dz in (-sz, sz):
+                    local: np.ndarray = np.array([dx, dy, dz], dtype=np.float64)
+                    pts.append(c + xmat @ local)
+        return pts
+
+    # Sphere: sample axis points in world frame.
+    if gtype == mj_sphere:
+        r: float = float(gsize[0])
+        return [
+            c + np.array([r, 0.0, 0.0], dtype=np.float64),
+            c + np.array([-r, 0.0, 0.0], dtype=np.float64),
+            c + np.array([0.0, r, 0.0], dtype=np.float64),
+            c + np.array([0.0, -r, 0.0], dtype=np.float64),
+            c + np.array([0.0, 0.0, r], dtype=np.float64),
+            c + np.array([0.0, 0.0, -r], dtype=np.float64),
+        ]
+
+    return [c]
+
+
+def _argmax_point(points: list[np.ndarray], axis: int) -> np.ndarray | None:
+    """Return point with maximum coordinate on axis, or None."""
+    if not points:
+        return None
+    best: np.ndarray = points[0]
+    best_v: float = float(best[axis])
+    for p in points[1:]:
+        v: float = float(p[axis])
+        if v > best_v:
+            best = p
+            best_v = v
+    return best
+
+
+def _argmin_point(points: list[np.ndarray], axis: int) -> np.ndarray | None:
+    """Return point with minimum coordinate on axis, or None."""
+    if not points:
+        return None
+    best: np.ndarray = points[0]
+    best_v: float = float(best[axis])
+    for p in points[1:]:
+        v: float = float(p[axis])
+        if v < best_v:
+            best = p
+            best_v = v
+    return best
+
+
+def _terminal_points(
+    model: object,
+    data: object,
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    """Return (head_xyz, tiptoe1_xyz, tiptoe2_xyz) best-effort from geom extrema."""
+    # Head: max z over all non-plane geoms.
+    head_candidates: list[np.ndarray] = []
+    try:
+        ngeom: int = int(model.ngeom)
+    except Exception:
+        ngeom = 0
+
+    for gid in range(ngeom):
+        head_candidates.extend(
+            _geom_extreme_points(model=model, data=data, geom_id=gid)
         )
-        if pos is not None:
-            return pos
-    return None
+    head_xyz: np.ndarray | None = _argmax_point(points=head_candidates, axis=2)
 
+    # Tiptoes: max-x endpoint per foot geom (if names exist).
+    foot1_geom_candidates: tuple[str, ...] = (
+        "foot",
+        "right_foot",
+        "foot_right",
+        "foot_geom",
+        "foot_1",
+    )
+    foot2_geom_candidates: tuple[str, ...] = (
+        "foot_left",
+        "left_foot",
+        "foot_l",
+        "foot_left_geom",
+        "foot_2",
+    )
 
-def _first_body_speed2d(env: gym.Env, names: Sequence[str]) -> float | None:
-    """Return the first available body planar speed among candidate names."""
-    for name in names:
-        s: float | None = _maybe_body_speed2d(env=env, body_name=str(name))
-        if s is not None:
-            return float(s)
-    return None
+    foot1_id: int | None = _first_id(
+        model=model, names=foot1_geom_candidates, kind="geom"
+    )
+    foot2_id: int | None = _first_id(
+        model=model, names=foot2_geom_candidates, kind="geom"
+    )
 
+    tip1_xyz: np.ndarray | None = None
+    tip2_xyz: np.ndarray | None = None
 
-def _first_geom_pos(
-    env: gym.Env, names: Sequence[str]
-) -> tuple[float, float, float] | None:
-    """Return the first available geom position among candidate names."""
-    for name in names:
-        pos: tuple[float, float, float] | None = _maybe_geom_pos(
-            env=env,
-            geom_name=str(name),
+    if foot1_id is not None:
+        pts1: list[np.ndarray] = _geom_extreme_points(
+            model=model, data=data, geom_id=foot1_id
         )
-        if pos is not None:
-            return pos
-    return None
+        tip1_xyz = _argmax_point(points=pts1, axis=0)
+
+    if foot2_id is not None:
+        pts2: list[np.ndarray] = _geom_extreme_points(
+            model=model, data=data, geom_id=foot2_id
+        )
+        tip2_xyz = _argmax_point(points=pts2, axis=0)
+
+    return (head_xyz, tip1_xyz, tip2_xyz)
 
 
-def _first_geom_speed2d(env: gym.Env, names: Sequence[str]) -> float | None:
-    """Return the first available geom planar speed among candidate names."""
-    for name in names:
-        s: float | None = _maybe_geom_speed2d(env=env, geom_name=str(name))
-        if s is not None:
-            return float(s)
-    return None
+def _update_xy_fields(
+    info: dict,
+    env: gym.Env,
+    prev_xy: dict[str, tuple[float, float]],
+) -> dict[str, tuple[float, float]]:
+    """Populate info with <name>_x, <name>_y, <name>_dx, <name>_dy for all joints.
+
+    Additionally populates terminal points:
+      - head_x/head_y/head_z and head_dx/head_dy
+      - tiptoes_x/tiptoes_y/tiptoes_z and tiptoes_dx/tiptoes_dy
+      - tiptoes_left_x/tiptoes_left_y/tiptoes_left_z and corresponding d*
+    """
+    md: tuple[object, object] | None = _mujoco_model_data(env=env)
+    if md is None:
+        return prev_xy
+    model, data = md
+
+    dt: float | None = _effective_dt(env=env, info=info)
+    new_prev: dict[str, tuple[float, float]] = dict(prev_xy)
+
+    # Joints: use data.xanchor (world joint anchor positions).
+    joint_names: list[str] = _joint_names(model=model)
+    try:
+        xanchor = data.xanchor
+    except Exception:
+        xanchor = None
+
+    if xanchor is not None:
+        for j, jname in enumerate(joint_names):
+            p: tuple[float, float, float] | None = _pos3(arr=xanchor, idx=int(j))
+            if p is None:
+                continue
+            x: float = float(p[0])
+            y: float = float(p[1])
+            info[f"{jname}_x"] = x
+            info[f"{jname}_y"] = y
+
+            if dt is not None:
+                prev: tuple[float, float] | None = prev_xy.get(jname)
+                if prev is not None:
+                    info[f"{jname}_dx"] = float((x - float(prev[0])) / dt)
+                    info[f"{jname}_dy"] = float((y - float(prev[1])) / dt)
+                else:
+                    info[f"{jname}_dx"] = 0.0
+                    info[f"{jname}_dy"] = 0.0
+
+            new_prev[jname] = (x, y)
+
+    # Terminals: geom extrema (robust; does not rely on specific names existing).
+    head_xyz, tip1_xyz, tip2_xyz = _terminal_points(model=model, data=data)
+
+    def _put_term(name: str, xyz: np.ndarray | None) -> None:
+        if xyz is None:
+            return
+        x: float = float(xyz[0])
+        y: float = float(xyz[1])
+        z: float = float(xyz[2])
+        info[f"{name}_x"] = x
+        info[f"{name}_y"] = y
+        info[f"{name}_z"] = z
+
+        if dt is not None:
+            prev: tuple[float, float] | None = prev_xy.get(name)
+            if prev is not None:
+                info[f"{name}_dx"] = float((x - float(prev[0])) / dt)
+                info[f"{name}_dy"] = float((y - float(prev[1])) / dt)
+            else:
+                info[f"{name}_dx"] = 0.0
+                info[f"{name}_dy"] = 0.0
+
+        new_prev[name] = (x, y)
+
+    _put_term(name="head", xyz=head_xyz)
+
+    # Keep a stable convention: "tiptoes" = forward-most of the two feet by x.
+    if tip1_xyz is not None and tip2_xyz is not None:
+        if float(tip1_xyz[0]) >= float(tip2_xyz[0]):
+            _put_term(name="tiptoes", xyz=tip1_xyz)
+            _put_term(name="tiptoes_left", xyz=tip2_xyz)
+        else:
+            _put_term(name="tiptoes", xyz=tip2_xyz)
+            _put_term(name="tiptoes_left", xyz=tip1_xyz)
+    else:
+        _put_term(name="tiptoes", xyz=tip1_xyz)
+        _put_term(name="tiptoes_left", xyz=tip2_xyz)
+
+    return new_prev
+
+
+def _mujoco_info_update(info: dict, env: gym.Env) -> None:
+    """Populate info with MuJoCo-derived positions/velocities when available."""
+    md: tuple[object, object] | None = _mujoco_model_data(env=env)
+    if md is None:
+        return
+    model, data = md
+
+    torso_names: tuple[str, ...] = ("torso", "hips", "pelvis")
+    torso_body_id: int | None = _first_id(model=model, names=torso_names, kind="body")
+
+    if torso_body_id is not None:
+        x_hips: float | None = _body_x(data=data, body_id=torso_body_id)
+        if x_hips is not None:
+            info["x_hips"] = float(x_hips)
+
+        torso_speed: float | None = _obj_speed2d(
+            model=model, data=data, kind="body", obj_id=torso_body_id
+        )
+        if torso_speed is not None:
+            info["torso_speed"] = float(torso_speed)
+
+        torso_pos: tuple[float, float, float] | None = _pos3(
+            arr=data.xpos,
+            idx=torso_body_id,
+        )
+        if torso_pos is not None:
+            info["z_torso"] = float(torso_pos[2])
+
+    if "z_torso" not in info:
+        torso_geom_candidates: tuple[str, ...] = (
+            "torso",
+            "torso_geom",
+            "body",
+            "trunk",
+        )
+        torso_geom_id: int | None = _first_id(
+            model=model, names=torso_geom_candidates, kind="geom"
+        )
+        if torso_geom_id is not None:
+            gpos: tuple[float, float, float] | None = _pos3(
+                arr=data.geom_xpos,
+                idx=torso_geom_id,
+            )
+            if gpos is not None:
+                info["z_torso"] = float(gpos[2])
+
+    foot1_geom_candidates: tuple[str, ...] = (
+        "foot",
+        "right_foot",
+        "foot_right",
+        "foot_geom",
+        "foot_1",
+    )
+    foot2_geom_candidates: tuple[str, ...] = (
+        "foot_left",
+        "left_foot",
+        "foot_l",
+        "foot_left_geom",
+        "foot_2",
+    )
+
+    foot1_id: int | None = _first_id(
+        model=model, names=foot1_geom_candidates, kind="geom"
+    )
+    foot2_id: int | None = _first_id(
+        model=model, names=foot2_geom_candidates, kind="geom"
+    )
+
+    foot1_pos: tuple[float, float, float] | None = None
+    foot2_pos: tuple[float, float, float] | None = None
+
+    if foot1_id is not None:
+        foot1_pos = _pos3(arr=data.geom_xpos, idx=foot1_id)
+        s1: float | None = _obj_speed2d(
+            model=model, data=data, kind="geom", obj_id=foot1_id
+        )
+        if s1 is not None:
+            info["foot1_speed2d"] = float(s1)
+
+    if foot2_id is not None:
+        foot2_pos = _pos3(arr=data.geom_xpos, idx=foot2_id)
+        s2: float | None = _obj_speed2d(
+            model=model, data=data, kind="geom", obj_id=foot2_id
+        )
+        if s2 is not None:
+            info["foot2_speed2d"] = float(s2)
+
+    if foot1_pos is not None:
+        info["x_foot1"] = float(foot1_pos[0])
+        info["y_foot1"] = float(foot1_pos[1])
+        info["z_foot1"] = float(foot1_pos[2])
+
+    if foot2_pos is not None:
+        info["x_foot2"] = float(foot2_pos[0])
+        info["y_foot2"] = float(foot2_pos[1])
+        info["z_foot2"] = float(foot2_pos[2])
+
+    if foot1_pos is not None and foot2_pos is not None:
+        info["lowest_foot_height"] = float(min(foot1_pos[2], foot2_pos[2]))
+        dx: float = float(foot1_pos[0] - foot2_pos[0])
+        dy: float = float(foot1_pos[1] - foot2_pos[1])
+        info["feet_dist_2d"] = float(sqrt(dx * dx + dy * dy))
+    elif foot1_pos is not None:
+        info["lowest_foot_height"] = float(foot1_pos[2])
+    elif foot2_pos is not None:
+        info["lowest_foot_height"] = float(foot2_pos[2])
+
+
+# -------------------------------------- Env code --------------------------------------
 
 
 @dataclass
@@ -332,6 +611,8 @@ class PixelObservationWrapper(gym.Wrapper):
             shape=(c_out, self.height, self.width),
             dtype=np.uint8,
         )
+
+        self._prev_xy: dict[str, tuple[float, float]] = {}
 
     def _crop_frame(self, frame: np.ndarray) -> np.ndarray:
         """Crop borders from an HxWxC RGB frame using fractional crop ratios.
@@ -394,6 +675,7 @@ class PixelObservationWrapper(gym.Wrapper):
 
     def reset(self, **kwargs) -> tuple[np.ndarray, dict]:
         _obs, info = self.env.reset(**kwargs)
+        self._prev_xy = {}
         return self._get_obs(), info
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
@@ -406,105 +688,10 @@ class PixelObservationWrapper(gym.Wrapper):
         if "TimeLimit.truncated" in info:
             info["time_limit_truncated"] = bool(info["TimeLimit.truncated"])
 
-        torso_names: tuple[str, ...] = ("torso", "hips", "pelvis")
-        x_hips: float | None = _first_body_x(env=self.env, names=torso_names)
-        torso_speed: float | None = _first_body_speed2d(env=self.env, names=torso_names)
-        torso_pos: tuple[float, float, float] | None = _first_body_pos(
-            env=self.env,
-            names=torso_names,
+        _mujoco_info_update(info=info, env=self.env)
+        self._prev_xy = _update_xy_fields(
+            info=info, env=self.env, prev_xy=self._prev_xy
         )
-
-        torso_z: float | None = None
-        if torso_pos is not None:
-            torso_z = float(torso_pos[2])
-        else:
-            torso_geom_candidates: tuple[str, ...] = (
-                "torso",
-                "torso_geom",
-                "body",
-                "trunk",
-            )
-            torso_geom_pos: tuple[float, float, float] | None = _first_geom_pos(
-                env=self.env,
-                names=torso_geom_candidates,
-            )
-            if torso_geom_pos is not None:
-                torso_z = float(torso_geom_pos[2])
-
-        if x_hips is not None:
-            info["x_hips"] = float(x_hips)
-        if torso_speed is not None:
-            info["torso_speed"] = float(torso_speed)
-        if torso_z is not None:
-            info["z_torso"] = float(torso_z)
-
-        foot1_geom_candidates: tuple[str, ...] = (
-            "foot",
-            "right_foot",
-            "foot_right",
-            "foot_geom",
-            "foot_1",
-        )
-        foot2_geom_candidates: tuple[str, ...] = (
-            "foot_left",
-            "left_foot",
-            "foot_l",
-            "foot_left_geom",
-            "foot_2",
-        )
-
-        foot1_pos: tuple[float, float, float] | None = _first_geom_pos(
-            env=self.env,
-            names=foot1_geom_candidates,
-        )
-        foot2_pos: tuple[float, float, float] | None = _first_geom_pos(
-            env=self.env,
-            names=foot2_geom_candidates,
-        )
-
-        foot1_speed2d: float | None = _first_geom_speed2d(
-            env=self.env,
-            names=foot1_geom_candidates,
-        )
-        foot2_speed2d: float | None = _first_geom_speed2d(
-            env=self.env,
-            names=foot2_geom_candidates,
-        )
-
-        if foot1_speed2d is not None:
-            info["foot1_speed2d"] = float(foot1_speed2d)
-        if foot2_speed2d is not None:
-            info["foot2_speed2d"] = float(foot2_speed2d)
-
-        if foot1_pos is not None:
-            x1: float = float(foot1_pos[0])
-            y1: float = float(foot1_pos[1])
-            z1: float = float(foot1_pos[2])
-            info["x_foot1"] = x1
-            info["y_foot1"] = y1
-            info["z_foot1"] = z1
-
-        if foot2_pos is not None:
-            x2: float = float(foot2_pos[0])
-            y2: float = float(foot2_pos[1])
-            z2: float = float(foot2_pos[2])
-            info["x_foot2"] = x2
-            info["y_foot2"] = y2
-            info["z_foot2"] = z2
-
-        if foot1_pos is not None and foot2_pos is not None:
-            lowest_foot_height: float = float(min(foot1_pos[2], foot2_pos[2]))
-            info["lowest_foot_height"] = lowest_foot_height
-        elif foot1_pos is not None:
-            info["lowest_foot_height"] = float(foot1_pos[2])
-        elif foot2_pos is not None:
-            info["lowest_foot_height"] = float(foot2_pos[2])
-
-        if foot1_pos is not None and foot2_pos is not None:
-            dx: float = float(foot1_pos[0] - foot2_pos[0])
-            dy: float = float(foot1_pos[1] - foot2_pos[1])
-            feet_dist_2d: float = float(sqrt(dx * dx + dy * dy))
-            info["feet_dist_2d"] = feet_dist_2d
 
         return self._get_obs(), float(reward), bool(terminated), bool(truncated), info
 
