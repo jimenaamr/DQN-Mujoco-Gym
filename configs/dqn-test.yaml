@@ -54,7 +54,7 @@ env:
 train:
   total_steps: 40_000
   learning_starts: 2_000
-  train_freq: 4
+  train_freq: 10 #4
   batch_size: 32
   buffer_size: 200_000
   gamma: 0.99

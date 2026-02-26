@@ -1,10 +1,9 @@
-# src/dqn/env.py
+# src/ablation/env.py
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from math import sqrt
 
 import cv2
 import gymnasium as gym
@@ -19,7 +18,7 @@ from src.ablation.reward import walker2d_default_reward
 CROPS: tuple[float, float, float, float] = (0.25, 0.05, 0.1, 0.1)
 
 
-# ------------------------- MuJoCo position/velocity retrieval -------------------------
+# ------------------------- MuJoCo model/data helpers -------------------------
 
 
 def _mujoco_model_data(env: gym.Env) -> tuple[object, object] | None:
@@ -32,87 +31,51 @@ def _mujoco_model_data(env: gym.Env) -> tuple[object, object] | None:
     return (model, data)
 
 
-def _mujoco_id(model: object, name: str, kind: str) -> int | None:
-    """Resolve a MuJoCo object id (body/geom/site/joint) by name, or None."""
+def _mujoco_body_id(model: object, name: str) -> int | None:
+    """Resolve a MuJoCo body id by name, or None."""
     try:
-        if kind == "body":
-            return int(model.body(name).id)  # type: ignore[misc]
-        if kind == "geom":
-            return int(model.geom(name).id)  # type: ignore[misc]
-        if kind == "site":
-            return int(model.site(name).id)  # type: ignore[misc]
-        if kind == "joint":
-            return int(model.joint(name).id)  # type: ignore[misc]
-        return None
+        return int(model.body(name).id)  # type: ignore[misc]
     except Exception:
         name2id = getattr(model, "name2id", None)
         if name2id is None:
             return None
         try:
-            return int(name2id(name, kind))
+            return int(name2id(name, "body"))
         except Exception:
             return None
 
 
-def _first_id(model: object, names: Sequence[str], kind: str) -> int | None:
-    """Return first resolvable id for the given MuJoCo object kind."""
-    for n in names:
-        i: int | None = _mujoco_id(model=model, name=str(n), kind=kind)
-        if i is not None:
-            return int(i)
-    return None
-
-
-def _pos3(arr: object, idx: int) -> tuple[float, float, float] | None:
-    """Return (x,y,z) from arr[idx], or None if unavailable."""
+def _body_xz(data: object, body_id: int) -> tuple[float, float] | None:
+    """Return (x,z) for body in world coordinates, or None."""
     try:
-        p = arr[idx]
-        return (float(p[0]), float(p[1]), float(p[2]))
+        p = data.xpos[body_id]
+        return (float(p[0]), float(p[2]))
     except Exception:
         return None
 
 
-def _body_x(data: object, body_id: int) -> float | None:
-    """Return body x-position, or None if unavailable."""
-    try:
-        return float(data.xpos[body_id][0])
-    except Exception:
-        return None
-
-
-def _obj_speed2d(model: object, data: object, kind: str, obj_id: int) -> float | None:
-    """Return planar speed for MuJoCo body/geom, or None if not available."""
+def _body_vxvz(model: object, data: object, body_id: int) -> tuple[float, float] | None:
+    """Return (vx,vz) for body in world coordinates, or None."""
     try:
         import mujoco  # type: ignore
 
         vel6: np.ndarray = np.zeros(shape=(6,), dtype=np.float64)
-        mjtobj = (
-            mujoco.mjtObj.mjOBJ_BODY  # type: ignore[attr-defined]
-            if kind == "body"
-            else mujoco.mjtObj.mjOBJ_GEOM  # type: ignore[attr-defined]
-        )
         mujoco.mj_objectVelocity(  # type: ignore[attr-defined]
             model,
             data,
-            mjtobj,
-            int(obj_id),
+            mujoco.mjtObj.mjOBJ_BODY,  # type: ignore[attr-defined]
+            int(body_id),
             vel6,
             0,
         )
-        vx: float = float(vel6[0])
-        vy: float = float(vel6[1])
-        return float(sqrt(vx * vx + vy * vy))
+        return (float(vel6[0]), float(vel6[2]))
     except Exception:
         pass
 
+    # Fallback if available.
     try:
-        if kind == "body":
-            v = data.xvelp[obj_id]
-        else:
-            v = data.geom_xvelp[obj_id]
-        vx_f: float = float(v[0])
-        vy_f: float = float(v[1])
-        return float(sqrt(vx_f * vx_f + vy_f * vy_f))
+        v = data.xvelp[body_id]
+        return (float(v[0]), float(v[2]))
     except Exception:
         return None
 
@@ -131,54 +94,7 @@ def _effective_dt(env: gym.Env, info: dict) -> float | None:
     return float(base_dt * float(repeat))
 
 
-def _sanitize_name(name: str) -> str:
-    """Make MuJoCo names safe for info keys."""
-    return str(name).strip().replace(" ", "_")
-
-
-def _joint_names(model: object) -> list[str]:
-    """Return a list of joint names from the MuJoCo model (best-effort)."""
-    names: list[str] = []
-    try:
-        njnt: int = int(model.njnt)
-    except Exception:
-        return names
-
-    try:
-        joint_fn = model.joint
-        for j in range(njnt):
-            try:
-                nm: str = str(joint_fn(j).name)
-                if nm:
-                    names.append(_sanitize_name(name=nm))
-            except Exception:
-                continue
-        if names:
-            return names
-    except Exception:
-        pass
-
-    try:
-        import mujoco  # type: ignore
-
-        for j in range(njnt):
-            try:
-                nm2: str | None = mujoco.mj_id2name(  # type: ignore[attr-defined]
-                    model,
-                    mujoco.mjtObj.mjOBJ_JOINT,  # type: ignore[attr-defined]
-                    int(j),
-                )
-                if nm2:
-                    names.append(_sanitize_name(name=str(nm2)))
-            except Exception:
-                continue
-    except Exception:
-        pass
-
-    return names
-
-
-# ------------------------- Terminal points via geom extrema -------------------------
+# ------------------------- Head estimation via geom extrema -------------------------
 
 
 def _geom_rot_z_axis(data: object, geom_id: int) -> np.ndarray | None:
@@ -223,11 +139,9 @@ def _geom_extreme_points(model: object, data: object, geom_id: int) -> list[np.n
     gsize: np.ndarray | None = _geom_size(model=model, geom_id=geom_id)
     gtype: int | None = _geom_type(model=model, geom_id=geom_id)
 
-    # If we can't reason about shape, use center only.
     if gsize is None or gtype is None:
         return [c]
 
-    # Try to map mujoco enums; if unavailable, fall back to heuristic by value.
     try:
         import mujoco  # type: ignore
 
@@ -242,7 +156,6 @@ def _geom_extreme_points(model: object, data: object, geom_id: int) -> list[np.n
     if gtype == mj_plane:
         return []
 
-    # Capsule / cylinder: endpoints along local z axis.
     if gtype == mj_capsule or gtype == mj_cyl:
         axis_z: np.ndarray | None = _geom_rot_z_axis(data=data, geom_id=geom_id)
         if axis_z is None:
@@ -250,13 +163,10 @@ def _geom_extreme_points(model: object, data: object, geom_id: int) -> list[np.n
 
         radius: float = float(gsize[0])
         half_len: float = float(gsize[1])
-
-        # Capsule extends by radius beyond the cylinder half-length.
         half_extent: float = float(half_len + (radius if gtype == mj_capsule else 0.0))
         d: np.ndarray = axis_z * float(half_extent)
         return [c - d, c + d]
 
-    # Box: sample 8 corners (local frame) -> world via xmat.
     if gtype == mj_box:
         try:
             xmat = np.asarray(data.geom_xmat[geom_id], dtype=np.float64).reshape(3, 3)
@@ -275,7 +185,6 @@ def _geom_extreme_points(model: object, data: object, geom_id: int) -> list[np.n
                     pts.append(c + xmat @ local)
         return pts
 
-    # Sphere: sample axis points in world frame.
     if gtype == mj_sphere:
         r: float = float(gsize[0])
         return [
@@ -304,26 +213,8 @@ def _argmax_point(points: list[np.ndarray], axis: int) -> np.ndarray | None:
     return best
 
 
-def _argmin_point(points: list[np.ndarray], axis: int) -> np.ndarray | None:
-    """Return point with minimum coordinate on axis, or None."""
-    if not points:
-        return None
-    best: np.ndarray = points[0]
-    best_v: float = float(best[axis])
-    for p in points[1:]:
-        v: float = float(p[axis])
-        if v < best_v:
-            best = p
-            best_v = v
-    return best
-
-
-def _terminal_points(
-    model: object,
-    data: object,
-) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
-    """Return (head_xyz, tiptoe1_xyz, tiptoe2_xyz) best-effort from geom extrema."""
-    # Head: max z over all non-plane geoms.
+def _head_xyz(model: object, data: object) -> np.ndarray | None:
+    """Return head xyz as max-z point across all non-plane geoms (best-effort)."""
     head_candidates: list[np.ndarray] = []
     try:
         ngeom: int = int(model.ngeom)
@@ -334,244 +225,125 @@ def _terminal_points(
         head_candidates.extend(
             _geom_extreme_points(model=model, data=data, geom_id=gid)
         )
-    head_xyz: np.ndarray | None = _argmax_point(points=head_candidates, axis=2)
-
-    # Tiptoes: max-x endpoint per foot geom (if names exist).
-    foot1_geom_candidates: tuple[str, ...] = (
-        "foot",
-        "right_foot",
-        "foot_right",
-        "foot_geom",
-        "foot_1",
-    )
-    foot2_geom_candidates: tuple[str, ...] = (
-        "foot_left",
-        "left_foot",
-        "foot_l",
-        "foot_left_geom",
-        "foot_2",
-    )
-
-    foot1_id: int | None = _first_id(
-        model=model, names=foot1_geom_candidates, kind="geom"
-    )
-    foot2_id: int | None = _first_id(
-        model=model, names=foot2_geom_candidates, kind="geom"
-    )
-
-    tip1_xyz: np.ndarray | None = None
-    tip2_xyz: np.ndarray | None = None
-
-    if foot1_id is not None:
-        pts1: list[np.ndarray] = _geom_extreme_points(
-            model=model, data=data, geom_id=foot1_id
-        )
-        tip1_xyz = _argmax_point(points=pts1, axis=0)
-
-    if foot2_id is not None:
-        pts2: list[np.ndarray] = _geom_extreme_points(
-            model=model, data=data, geom_id=foot2_id
-        )
-        tip2_xyz = _argmax_point(points=pts2, axis=0)
-
-    return (head_xyz, tip1_xyz, tip2_xyz)
+    return _argmax_point(points=head_candidates, axis=2)
 
 
-def _update_xy_fields(
-    info: dict,
+# ------------------------- info shaping (ONLY allowed keys) -------------------------
+
+
+_ALLOWED_DEFAULT_KEYS: tuple[str, ...] = (
+    "x_position",
+    "x_velocity",
+    "reward_forward",
+    "reward_ctrl",
+    "reward_survive",
+)
+
+
+_BODY_KEY_MAP: dict[str, str] = {
+    "torso": "torso",
+    "thigh": "thigh_right",
+    "leg": "leg_right",
+    "foot": "foot_right",
+    "thigh_left": "thigh_left",
+    "leg_left": "leg_left",
+    "foot_left": "foot_left",
+}
+
+
+def _build_info(
+    raw_info: dict,
     env: gym.Env,
-    prev_xy: dict[str, tuple[float, float]],
-) -> dict[str, tuple[float, float]]:
-    """Populate info with <name>_x, <name>_y, <name>_dx, <name>_dy for all joints.
+    terminated: bool,
+    truncated: bool,
+    prev_head_xy: tuple[float, float] | None,
+    prev_body_xy: dict[str, tuple[float, float]],
+) -> tuple[dict, tuple[float, float] | None, dict[str, tuple[float, float]]]:
+    """Build a new info dict with ONLY the required fields.
 
-    Additionally populates terminal points:
-      - head_x/head_y/head_z and head_dx/head_dy
-      - tiptoes_x/tiptoes_y/tiptoes_z and tiptoes_dx/tiptoes_dy
-      - tiptoes_left_x/tiptoes_left_y/tiptoes_left_z and corresponding d*
+    Coordinate convention:
+      - x := MuJoCo x
+      - y := MuJoCo z (vertical)
+
+    Velocities:
+      - dx, dy computed by finite differences using effective dt.
     """
+    info: dict = {}
+
+    for k in _ALLOWED_DEFAULT_KEYS:
+        if k in raw_info:
+            info[k] = raw_info[k]
+
+    if "z_distance_from_origin" in raw_info:
+        info["y_distance_from_origin"] = raw_info["z_distance_from_origin"]
+    elif "y_distance_from_origin" in raw_info:
+        info["y_distance_from_origin"] = raw_info["y_distance_from_origin"]
+
+    info["terminated"] = bool(terminated)
+    info["truncated"] = bool(truncated)
+
     md: tuple[object, object] | None = _mujoco_model_data(env=env)
     if md is None:
-        return prev_xy
+        return info, prev_head_xy, prev_body_xy
+
     model, data = md
+    dt: float | None = _effective_dt(env=env, info=raw_info)
 
-    dt: float | None = _effective_dt(env=env, info=info)
-    new_prev: dict[str, tuple[float, float]] = dict(prev_xy)
+    new_prev_body_xy: dict[str, tuple[float, float]] = dict(prev_body_xy)
 
-    # Joints: use data.xanchor (world joint anchor positions).
-    joint_names: list[str] = _joint_names(model=model)
-    try:
-        xanchor = data.xanchor
-    except Exception:
-        xanchor = None
+    # Bodies: positions and velocities via finite difference
+    for mujoco_name, out_name in _BODY_KEY_MAP.items():
+        bid: int | None = _mujoco_body_id(model=model, name=mujoco_name)
+        if bid is None:
+            continue
 
-    if xanchor is not None:
-        for j, jname in enumerate(joint_names):
-            p: tuple[float, float, float] | None = _pos3(arr=xanchor, idx=int(j))
-            if p is None:
-                continue
-            x: float = float(p[0])
-            y: float = float(p[1])
-            info[f"{jname}_x"] = x
-            info[f"{jname}_y"] = y
+        xz: tuple[float, float] | None = _body_xz(data=data, body_id=bid)
+        if xz is None:
+            continue
 
-            if dt is not None:
-                prev: tuple[float, float] | None = prev_xy.get(jname)
-                if prev is not None:
-                    info[f"{jname}_dx"] = float((x - float(prev[0])) / dt)
-                    info[f"{jname}_dy"] = float((y - float(prev[1])) / dt)
-                else:
-                    info[f"{jname}_dx"] = 0.0
-                    info[f"{jname}_dy"] = 0.0
+        x: float = float(xz[0])
+        y: float = float(xz[1])  # y := z
 
-            new_prev[jname] = (x, y)
-
-    # Terminals: geom extrema (robust; does not rely on specific names existing).
-    head_xyz, tip1_xyz, tip2_xyz = _terminal_points(model=model, data=data)
-
-    def _put_term(name: str, xyz: np.ndarray | None) -> None:
-        if xyz is None:
-            return
-        x: float = float(xyz[0])
-        y: float = float(xyz[1])
-        z: float = float(xyz[2])
-        info[f"{name}_x"] = x
-        info[f"{name}_y"] = y
-        info[f"{name}_z"] = z
+        info[f"{out_name}_x"] = x
+        info[f"{out_name}_y"] = y
 
         if dt is not None:
-            prev: tuple[float, float] | None = prev_xy.get(name)
-            if prev is not None:
-                info[f"{name}_dx"] = float((x - float(prev[0])) / dt)
-                info[f"{name}_dy"] = float((y - float(prev[1])) / dt)
+            prev_xy: tuple[float, float] | None = prev_body_xy.get(out_name)
+            if prev_xy is not None:
+                info[f"{out_name}_dx"] = float((x - float(prev_xy[0])) / dt)
+                info[f"{out_name}_dy"] = float((y - float(prev_xy[1])) / dt)
             else:
-                info[f"{name}_dx"] = 0.0
-                info[f"{name}_dy"] = 0.0
-
-        new_prev[name] = (x, y)
-
-    _put_term(name="head", xyz=head_xyz)
-
-    # Keep a stable convention: "tiptoes" = forward-most of the two feet by x.
-    if tip1_xyz is not None and tip2_xyz is not None:
-        if float(tip1_xyz[0]) >= float(tip2_xyz[0]):
-            _put_term(name="tiptoes", xyz=tip1_xyz)
-            _put_term(name="tiptoes_left", xyz=tip2_xyz)
+                info[f"{out_name}_dx"] = 0.0
+                info[f"{out_name}_dy"] = 0.0
         else:
-            _put_term(name="tiptoes", xyz=tip2_xyz)
-            _put_term(name="tiptoes_left", xyz=tip1_xyz)
-    else:
-        _put_term(name="tiptoes", xyz=tip1_xyz)
-        _put_term(name="tiptoes_left", xyz=tip2_xyz)
+            info[f"{out_name}_dx"] = 0.0
+            info[f"{out_name}_dy"] = 0.0
 
-    return new_prev
+        new_prev_body_xy[out_name] = (x, y)
 
+        # Make sure x_velocity is always consistent with torso_dx.
+        if out_name == "torso":
+            info["x_velocity"] = float(info.get("torso_dx", 0.0))
 
-def _mujoco_info_update(info: dict, env: gym.Env) -> None:
-    """Populate info with MuJoCo-derived positions/velocities when available."""
-    md: tuple[object, object] | None = _mujoco_model_data(env=env)
-    if md is None:
-        return
-    model, data = md
+    # Head: position from geom extrema; velocity by finite differences
+    head_xyz: np.ndarray | None = _head_xyz(model=model, data=data)
+    if head_xyz is not None:
+        head_x: float = float(head_xyz[0])
+        head_y: float = float(head_xyz[2])  # y := z
 
-    torso_names: tuple[str, ...] = ("torso", "hips", "pelvis")
-    torso_body_id: int | None = _first_id(model=model, names=torso_names, kind="body")
+        info["head_x"] = head_x
+        info["head_y"] = head_y
 
-    if torso_body_id is not None:
-        x_hips: float | None = _body_x(data=data, body_id=torso_body_id)
-        if x_hips is not None:
-            info["x_hips"] = float(x_hips)
+        if dt is not None and prev_head_xy is not None:
+            info["head_dx"] = float((head_x - float(prev_head_xy[0])) / dt)
+            info["head_dy"] = float((head_y - float(prev_head_xy[1])) / dt)
+        else:
+            info["head_dx"] = 0.0
+            info["head_dy"] = 0.0
 
-        torso_speed: float | None = _obj_speed2d(
-            model=model, data=data, kind="body", obj_id=torso_body_id
-        )
-        if torso_speed is not None:
-            info["torso_speed"] = float(torso_speed)
+        prev_head_xy = (head_x, head_y)
 
-        torso_pos: tuple[float, float, float] | None = _pos3(
-            arr=data.xpos,
-            idx=torso_body_id,
-        )
-        if torso_pos is not None:
-            info["z_torso"] = float(torso_pos[2])
-
-    if "z_torso" not in info:
-        torso_geom_candidates: tuple[str, ...] = (
-            "torso",
-            "torso_geom",
-            "body",
-            "trunk",
-        )
-        torso_geom_id: int | None = _first_id(
-            model=model, names=torso_geom_candidates, kind="geom"
-        )
-        if torso_geom_id is not None:
-            gpos: tuple[float, float, float] | None = _pos3(
-                arr=data.geom_xpos,
-                idx=torso_geom_id,
-            )
-            if gpos is not None:
-                info["z_torso"] = float(gpos[2])
-
-    foot1_geom_candidates: tuple[str, ...] = (
-        "foot",
-        "right_foot",
-        "foot_right",
-        "foot_geom",
-        "foot_1",
-    )
-    foot2_geom_candidates: tuple[str, ...] = (
-        "foot_left",
-        "left_foot",
-        "foot_l",
-        "foot_left_geom",
-        "foot_2",
-    )
-
-    foot1_id: int | None = _first_id(
-        model=model, names=foot1_geom_candidates, kind="geom"
-    )
-    foot2_id: int | None = _first_id(
-        model=model, names=foot2_geom_candidates, kind="geom"
-    )
-
-    foot1_pos: tuple[float, float, float] | None = None
-    foot2_pos: tuple[float, float, float] | None = None
-
-    if foot1_id is not None:
-        foot1_pos = _pos3(arr=data.geom_xpos, idx=foot1_id)
-        s1: float | None = _obj_speed2d(
-            model=model, data=data, kind="geom", obj_id=foot1_id
-        )
-        if s1 is not None:
-            info["foot1_speed2d"] = float(s1)
-
-    if foot2_id is not None:
-        foot2_pos = _pos3(arr=data.geom_xpos, idx=foot2_id)
-        s2: float | None = _obj_speed2d(
-            model=model, data=data, kind="geom", obj_id=foot2_id
-        )
-        if s2 is not None:
-            info["foot2_speed2d"] = float(s2)
-
-    if foot1_pos is not None:
-        info["x_foot1"] = float(foot1_pos[0])
-        info["y_foot1"] = float(foot1_pos[1])
-        info["z_foot1"] = float(foot1_pos[2])
-
-    if foot2_pos is not None:
-        info["x_foot2"] = float(foot2_pos[0])
-        info["y_foot2"] = float(foot2_pos[1])
-        info["z_foot2"] = float(foot2_pos[2])
-
-    if foot1_pos is not None and foot2_pos is not None:
-        info["lowest_foot_height"] = float(min(foot1_pos[2], foot2_pos[2]))
-        dx: float = float(foot1_pos[0] - foot2_pos[0])
-        dy: float = float(foot1_pos[1] - foot2_pos[1])
-        info["feet_dist_2d"] = float(sqrt(dx * dx + dy * dy))
-    elif foot1_pos is not None:
-        info["lowest_foot_height"] = float(foot1_pos[2])
-    elif foot2_pos is not None:
-        info["lowest_foot_height"] = float(foot2_pos[2])
+    return info, prev_head_xy, new_prev_body_xy
 
 
 # -------------------------------------- Env code --------------------------------------
@@ -612,7 +384,8 @@ class PixelObservationWrapper(gym.Wrapper):
             dtype=np.uint8,
         )
 
-        self._prev_xy: dict[str, tuple[float, float]] = {}
+        self._prev_head_xy: tuple[float, float] | None = None
+        self._prev_body_xy: dict[str, tuple[float, float]] = {}
 
     def _crop_frame(self, frame: np.ndarray) -> np.ndarray:
         """Crop borders from an HxWxC RGB frame using fractional crop ratios.
@@ -675,22 +448,27 @@ class PixelObservationWrapper(gym.Wrapper):
 
     def reset(self, **kwargs) -> tuple[np.ndarray, dict]:
         _obs, info = self.env.reset(**kwargs)
-        self._prev_xy = {}
+        self._prev_head_xy = None
+        self._prev_body_xy = {}
         return self._get_obs(), info
 
     def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
-        _obs, reward, terminated, truncated, info = self.env.step(action=action)
+        _obs, reward, terminated, truncated, raw_info = self.env.step(action=action)
 
-        info = dict(info)
-        info["terminated"] = bool(terminated)
-        info["truncated"] = bool(truncated)
+        raw_info = dict(raw_info)
+        raw_info["terminated"] = bool(terminated)
+        raw_info["truncated"] = bool(truncated)
 
-        if "TimeLimit.truncated" in info:
-            info["time_limit_truncated"] = bool(info["TimeLimit.truncated"])
+        if "TimeLimit.truncated" in raw_info:
+            raw_info["time_limit_truncated"] = bool(raw_info["TimeLimit.truncated"])
 
-        _mujoco_info_update(info=info, env=self.env)
-        self._prev_xy = _update_xy_fields(
-            info=info, env=self.env, prev_xy=self._prev_xy
+        info, self._prev_head_xy, self._prev_body_xy = _build_info(
+            raw_info=raw_info,
+            env=self.env,
+            terminated=bool(terminated),
+            truncated=bool(truncated),
+            prev_head_xy=self._prev_head_xy,
+            prev_body_xy=self._prev_body_xy,
         )
 
         return self._get_obs(), float(reward), bool(terminated), bool(truncated), info

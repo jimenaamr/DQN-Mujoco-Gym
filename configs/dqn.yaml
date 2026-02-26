@@ -67,7 +67,7 @@ train:
   # total_steps: 100_000
   # total_steps: 80000
   learning_starts: 2_000
-  train_freq: 4
+  train_freq: 10
   batch_size: 32
   buffer_size: 200_000
   gamma: 0.99

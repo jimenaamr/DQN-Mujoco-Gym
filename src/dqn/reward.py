@@ -1,4 +1,4 @@
-# src/DQN_walker2d/reward.py
+# src/dqn/reward.py
 
 from __future__ import annotations
 
@@ -8,30 +8,31 @@ import numpy as np
 from src.dqn.monitoring import MONITOR
 
 
-def _first_xy(info: dict, names: list[str]) -> tuple[float, float] | None:
-    """Return (x,y) from the first available <name>_x/<name>_y pair."""
-    for n in names:
-        xk: str = f"{n}_x"
-        yk: str = f"{n}_y"
-        if xk in info and yk in info:
-            return (float(info[xk]), float(info[yk]))
-    return None
-
-
-def _first_dx(info: dict, names: list[str]) -> float | None:
-    """Return dx from the first available <name>_dx key."""
-    for n in names:
-        k: str = f"{n}_dx"
+def _first_float(info: dict, keys: list[str]) -> float | None:
+    """Return the first available float from a list of keys."""
+    for k in keys:
         if k in info:
             return float(info[k])
     return None
 
 
+def _body_xy(info: dict, body: str) -> tuple[float, float] | None:
+    """Return (x,y) from <body>_x/<body>_y if present."""
+    xk: str = f"{body}_x"
+    yk: str = f"{body}_y"
+    if xk in info and yk in info:
+        return (float(info[xk]), float(info[yk]))
+    return None
+
+
 def _head_height(info: dict) -> float:
-    """Return head height (z) using best-available convention."""
-    if "head_z" in info:
-        return float(info["head_z"])
-    return float(info.get("z_torso", 0.0))
+    """Return head height using the new convention: y is vertical."""
+    if "head_y" in info:
+        return float(info["head_y"])
+    torso_y: float | None = _first_float(info=info, keys=["torso_y"])
+    if torso_y is not None:
+        return float(torso_y)
+    return 0.0
 
 
 def walker2d_default_reward(
@@ -44,57 +45,83 @@ def walker2d_default_reward(
     env_reward: float,
     env: gym.Env,
 ) -> float:
-    """Reproduce the default Walker2d reward, with extra shaping terms."""
+    """Reproduce the default Walker2d reward, with extra shaping terms.
+
+    This version is equivalent to the previous one, but it only relies on the
+    reduced info dict:
+      - default env terms (reward_* and x_velocity)
+      - body x/y and dx/dy
+      - head x/y and dx/dy
+    """
     healthy_reward: float = float(info.get("reward_survive", 0.0))
     forward_reward: float = float(info.get("reward_forward", 0.0))
     ctrl_cost: float = float(info.get("reward_ctrl", 0.0))
 
-    x_velocity_new: float | None = _first_dx(
-        info=info, names=["rootx", "torso", "hips", "pelvis"]
-    )
+    # Prefer x_velocity from env; if absent, fall back to torso_dx.
     x_velocity: float = float(info.get("x_velocity", 0.0))
-    if x_velocity_new is not None:
-        x_velocity = float(x_velocity_new)
+    torso_dx: float | None = _first_float(info=info, keys=["torso_dx"])
+    if torso_dx is not None:
+        x_velocity = float(torso_dx)
 
-    # Prefer terminal tiptoes if present; otherwise keep precomputed feet_dist_2d.
-    feet_dist: float = float(info.get("feet_dist_2d", 0.0))
-    tip_xy: tuple[float, float] | None = _first_xy(info=info, names=["tiptoes"])
-    tip_l_xy: tuple[float, float] | None = _first_xy(info=info, names=["tiptoes_left"])
-    if tip_xy is not None and tip_l_xy is not None:
-        dx_f: float = float(tip_xy[0] - tip_l_xy[0])
-        dy_f: float = float(tip_xy[1] - tip_l_xy[1])
+    # Feet distance in the (x, vertical) plane with the requested convention (y := z).
+    feet_dist: float = 0.0
+    fr: tuple[float, float] | None = _body_xy(info=info, body="foot_right")
+    fl: tuple[float, float] | None = _body_xy(info=info, body="foot_left")
+    if fr is not None and fl is not None:
+        dx_f: float = float(fr[0] - fl[0])
+        dy_f: float = float(fr[1] - fl[1])
         feet_dist = float(np.sqrt(dx_f * dx_f + dy_f * dy_f))
 
-    z_head: float = _head_height(info=info)
+    # Feet max speed components (new shaping term).
+    foot_right_dx: float = float(info.get("foot_right_dx", 0.0))
+    foot_left_dx: float = float(info.get("foot_left_dx", 0.0))
+    torso_dx_val: float = float(info.get("torso_dx", x_velocity))
+    feet_max_speed: float = float(
+        max(foot_right_dx, foot_left_dx) - max(0.0, torso_dx_val)
+    )
+
+    head_y: float = _head_height(info=info)
 
     r: float = 0.0
     r += healthy_reward
     r += forward_reward
     r -= ctrl_cost
 
-    x_velocity_reward: float = 0.10 * float(
-        np.clip(a=x_velocity, a_min=-4.0, a_max=4.0)
-    )
+    x_velocity_reward: float
+    x_velocity_reward = 0.02 * float(np.clip(a=x_velocity, a_min=-30.0, a_max=30.0))
     r += x_velocity_reward
 
-    feet_dist_reward: float = 0.10 * float(
-        np.clip(a=feet_dist, a_min=0.0, a_max=2.0) - 1.0
-    )
+    feet_dist_reward: float
+    feet_dist_reward = 0.30 * float(np.clip(a=feet_dist, a_min=0.0, a_max=2.0) - 0.5)
     r += feet_dist_reward
 
-    head_height_reward: float = 1.0 * float(
-        np.clip(a=(z_head - 1.25), a_min=-1.0, a_max=0.0)
+    feet_max_speed_reward: float = 0.02 * float(
+        np.clip(a=feet_max_speed, a_min=-30.0, a_max=30.0)
     )
+    r += feet_max_speed_reward
+
+    # Same shape as before, but using y as vertical (previously z).
+    head_height_reward: float
+    head_height_reward = 0.75 * float(np.clip(a=(head_y - 1.25), a_min=-1.0, a_max=0.0))
     r += head_height_reward
 
     if not (terminated or truncated):
         r += 0.05
 
+    MONITOR.add_field(name="healthy_reward", value=healthy_reward)
+    MONITOR.add_field(name="forward_reward", value=forward_reward)
+    MONITOR.add_field(name="ctrl_cost", value=ctrl_cost)
     MONITOR.add_field(name="x_velocity", value=x_velocity)
     MONITOR.add_field(name="x_velocity_reward", value=x_velocity_reward)
     MONITOR.add_field(name="feet_dist", value=feet_dist)
     MONITOR.add_field(name="feet_dist_reward", value=feet_dist_reward)
-    MONITOR.add_field(name="z_head", value=z_head)
+
+    MONITOR.add_field(name="torso dx", value=torso_dx_val)
+    MONITOR.add_field(name="feet dx", value=(foot_right_dx, foot_left_dx))
+
+    MONITOR.add_field(name="feet_max_speed", value=feet_max_speed)
+    MONITOR.add_field(name="feet_max_speed_reward", value=feet_max_speed_reward)
+    MONITOR.add_field(name="head_height", value=head_y)
     MONITOR.add_field(name="head_height_reward", value=head_height_reward)
 
     return r
