@@ -12,12 +12,14 @@ graphics_backend: str = auto_detect_mujoco_gl()
 os.environ.setdefault(key="MUJOCO_GL", value=graphics_backend)
 
 import re
+import shutil
 import signal
 import socket
 import subprocess
 import tempfile
 import time
 from argparse import Namespace
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,7 @@ from src.dqn.helper import (
 from src.dqn.monitoring import MONITOR
 from src.utils.tensorboard import launch_tensorboard
 
+LIVE_CLEANUP_TIMER: float = 120.0
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 _STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
 
@@ -469,6 +472,7 @@ def main(
     stabilizer_cfg: StabilizerConfig | None = stabilizer_config_from_yaml(cfg=cfg)
 
     train_env = make_env(spec=env_spec, seed=seed, stabilizer=stabilizer_cfg)
+    live_ep_queue: deque[tuple[float, int, Path]] = deque()
 
     obs_shape_raw: tuple[int, ...] | None = train_env.observation_space.shape
     if obs_shape_raw is None or len(obs_shape_raw) != 3:
@@ -724,6 +728,24 @@ def main(
                     episode_dir = live_dir / f"ep_{int(episode_idx):06d}"
                     _ensure_dir(episode_dir)
                     episode_frame_idx = 0
+
+                    # Remove episode dirs that are older than LIVE_CLEANUP_TIMER seconds
+                    live_ep_queue.append((
+                        float(time.time()),
+                        int(episode_idx),
+                        episode_dir,
+                    ))
+                    now_s: float = float(time.time())
+                    cutoff_s: float = now_s - float(LIVE_CLEANUP_TIMER)
+
+                    while live_ep_queue and live_ep_queue[0][0] < cutoff_s:
+                        _, old_ep_idx, old_ep_dir = live_ep_queue.popleft()
+
+                        # Never delete the currently active episode directory.
+                        if int(old_ep_idx) == int(episode_idx):
+                            continue
+
+                        shutil.rmtree(path=old_ep_dir, ignore_errors=True)
 
             if (
                 (step > 0)

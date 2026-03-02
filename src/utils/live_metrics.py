@@ -1,4 +1,4 @@
-# src/utils/display_metrics.py
+# src/utils/live_metrics.py
 
 from __future__ import annotations
 

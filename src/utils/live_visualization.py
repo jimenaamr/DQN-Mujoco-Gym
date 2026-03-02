@@ -232,6 +232,15 @@ def main(run_path_str: str) -> None:
     _ensure_cv2_qt_fonts_dir()
     import cv2
 
+    # Silence OpenCV warnings like "findDecoder imread_ ... can't open/read file".
+    try:
+        cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
+    except Exception:
+        try:
+            cv2.setLogLevel(3)  # 3 == LOG_LEVEL_ERROR on many builds
+        except Exception:
+            pass
+
     def _window_is_alive(name: str) -> bool:
         """Return True if an OpenCV window still exists (Qt/X close safe)."""
         try:
@@ -296,7 +305,14 @@ def main(run_path_str: str) -> None:
                 continue
 
             if mode == "RECORD":
-                if record_ep_dir is None:
+                if record_ep_dir is None or not record_ep_dir.exists():
+                    # Treat removed episode dir like "episode finished displaying":
+                    # reset state and wait for the next episode.
+                    wait_from = cur_ep
+                    buffer = []
+                    record_ep = None
+                    record_ep_dir = None
+                    next_idx = 0
                     mode = "WAIT"
                     continue
 

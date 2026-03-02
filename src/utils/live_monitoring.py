@@ -342,16 +342,19 @@ def _max_frame_index(ep_dir: Path) -> int:
         Max frame index, or -1 if none.
     """
     best: int = -1
-    for p in ep_dir.iterdir():
-        if not p.is_file():
-            continue
-        name: str = p.name
-        if not (name.startswith("frame_") and name.endswith(".jpg")):
-            continue
-        mid: str = name[len("frame_") : -len(".jpg")]
-        if not mid.isdigit():
-            continue
-        best = max(best, int(mid))
+    try:
+        for p in ep_dir.iterdir():
+            if not p.is_file():
+                continue
+            name: str = p.name
+            if not (name.startswith("frame_") and name.endswith(".jpg")):
+                continue
+            mid: str = name[len("frame_") : -len(".jpg")]
+            if not mid.isdigit():
+                continue
+            best = max(best, int(mid))
+    except Exception:
+        return -1
     return best
 
 
@@ -510,8 +513,10 @@ def main(run_path_str: str) -> None:
             else:
                 ep_dir = run_path / "live_frames" / f"ep_{int(ep):06d}"
                 if not ep_dir.exists():
-                    time.sleep(poll_dt_s)
-                    continue
+                    ep_dir = _find_latest_episode_dir(run_path=run_path)
+                    if ep_dir is None:
+                        time.sleep(poll_dt_s)
+                        continue
 
             max_idx: int = _max_frame_index(ep_dir=ep_dir)
             if max_idx < 0:
