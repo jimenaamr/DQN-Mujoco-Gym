@@ -17,69 +17,47 @@ env:
   action_prototypes:
 
   # 0) noop
-  - [ 0.0,  0.0,  0.0,  0.0,  0.0,  0.0]
+  - [+0, +0, +0, +0, +0, +0]
 
   # hip
-  - [+0, +0, +0, +2, +0, +0]
-  - [+0, +0, +0, -2, +0, +0]
-  - [+2, +0, +0, +0, +0, +0]
-  - [-2, +0, +0, +0, +0, +0]
+  - [+0, +0, +0, +1, +0, +0]
+  - [+0, +0, +0, -1, +0, +0]
+  - [+1, +0, +0, +0, +0, +0]
+  - [-1, +0, +0, +0, +0, +0]
 
   # knee
-  - [+0, +0, +0, +0, +2, +0]
-  - [+0, +0, +0, +0, -2, +0]
-  - [+0, +2, +0, +0, +0, +0]
-  - [+0, -2, +0, +0, +0, +0]
+  - [+0, +0, +0, +0, +1, +0]
+  - [+0, +0, +0, +0, -1, +0]
+  - [+0, +1, +0, +0, +0, +0]
+  - [+0, -1, +0, +0, +0, +0]
 
   # ankle
-  - [+0, +0, +0, +0, +0, +2]
-  - [+0, +0, +0, +0, +0, -2]
-  - [+0, +0, +2, +0, +0, +0]
-  - [+0, +0, -2, +0, +0, +0]
+  - [+0, +0, +0, +0, +0, +1]
+  - [+0, +0, +0, +0, +0, -1]
+  - [+0, +0, +1, +0, +0, +0]
+  - [+0, +0, -1, +0, +0, +0]
 
   # tobillo + rodilla
-  - [+0, +0, +0, +0, +2, -2]   # lean-forward correction (moderate)
-  - [+0, +0, +0, +0, -2, +2]   # lean-back correction (strong)
-  - [+0, +2, -2, +0, +0, +0]   # lean-forward correction (moderate)
-  - [+0, -2, +2, +0, +0, +0]   # lean-back correction (strong)
-
-
-
-
-
-
-
-
-
-# train:
-#   total_steps: 800000
-#   learning_starts: 20000
-#   train_freq: 4
-#   batch_size: 32
-#   buffer_size: 200000
-#   gamma: 0.99
-#   lr: 1.0e-4
-#   target_update_freq: 8000
-#   grad_clip_norm: 10.0
+  - [+0, +0, +0, +0, +1, -1]   # lean-forward correction (moderate)
+  - [+0, +0, +0, +0, -1, +1]   # lean-back correction (strong)
+  - [+0, +1, -1, +0, +0, +0]   # lean-forward correction (moderate)
+  - [+0, -1, +1, +0, +0, +0]   # lean-back correction (strong)
 
 train:
-  total_steps: 20_000_000
-  # total_steps: 100_000
-  # total_steps: 80000
+  total_steps: 30_000_000
   learning_starts: 2_000
-  train_freq: 10
-  batch_size: 32
+  train_freq: 4
+  batch_size: 32  # 64
   buffer_size: 200_000
   gamma: 0.99
-  lr: 5.0e-4 # 1.0e-4
+  lr: 1.0e-4 # 5.0e-5
   target_update_freq: 8000
   grad_clip_norm: 10.0
-  visualiztion: True
 
 exploration:
   eps_start: 1.0
   eps_end: 0.05
-  eps_decay_steps: 300000
+  eps_decay_steps: 300_000
 
 eval:
   # every_steps: 49999
@@ -94,6 +72,6 @@ logging:
   log_every: 200_000
 
 stabilizer:
-  initial_intensity: 0.01 #10.5
+  initial_intensity: 0.0 #10.5
   decay: 0.1
   ref_height: 0.95
