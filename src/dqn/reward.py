@@ -5,8 +5,6 @@ from __future__ import annotations
 import gymnasium as gym
 import numpy as np
 
-from src.dqn.monitoring import MONITOR
-
 
 def _first_float(info: dict, keys: list[str]) -> float | None:
     """Return the first available float from a list of keys."""
@@ -87,41 +85,47 @@ def walker2d_default_reward(
     r += forward_reward
     r -= ctrl_cost
 
-    x_velocity_reward: float
-    x_velocity_reward = 0.02 * float(np.clip(a=x_velocity, a_min=-30.0, a_max=30.0))
-    r += x_velocity_reward
+    # x_velocity_reward: float
+    # x_velocity_reward = 0.02 * float(np.clip(a=x_velocity, a_min=-30.0, a_max=30.0))
+    # r += x_velocity_reward
 
-    feet_dist_reward: float
-    feet_dist_reward = 0.30 * float(np.clip(a=feet_dist, a_min=0.0, a_max=2.0) - 0.5)
-    r += feet_dist_reward
+    # feet_dist_reward: float
+    # feet_dist_reward = 0.30 * float(np.clip(a=feet_dist, a_min=0.0, a_max=2.0) - 0.5)
+    # r += feet_dist_reward
 
-    feet_max_speed_reward: float = 0.02 * float(
-        np.clip(a=feet_max_speed, a_min=-30.0, a_max=30.0)
-    )
-    r += feet_max_speed_reward
+    # feet_max_speed_reward: float = 0.02 * float(
+    #     np.clip(a=feet_max_speed, a_min=-30.0, a_max=30.0)
+    # )
+    # r += feet_max_speed_reward
 
-    # Same shape as before, but using y as vertical (previously z).
-    head_height_reward: float
-    head_height_reward = 0.75 * float(np.clip(a=(head_y - 1.25), a_min=-1.0, a_max=0.0))
-    r += head_height_reward
+    # # Same shape as before, but using y as vertical (previously z).
+    # head_height_reward: float
+    # head_height_reward = 0.75 * float(np.clip(a=(head_y - 1.25), a_min=-1.0, a_max=0.0))
+    # r += head_height_reward
 
+    # if not (terminated or truncated):
+    #     r += 0.05
+
+    # MONITOR.add_field(name="healthy_reward", value=healthy_reward)
+    # MONITOR.add_field(name="forward_reward", value=forward_reward)
+    # MONITOR.add_field(name="ctrl_cost", value=ctrl_cost)
+    # MONITOR.add_field(name="x_velocity", value=x_velocity)
+    # MONITOR.add_field(name="x_velocity_reward", value=x_velocity_reward)
+    # MONITOR.add_field(name="feet_dist", value=feet_dist)
+    # MONITOR.add_field(name="feet_dist_reward", value=feet_dist_reward)
+
+    # MONITOR.add_field(name="torso dx", value=torso_dx_val)
+    # MONITOR.add_field(name="feet dx", value=(foot_right_dx, foot_left_dx))
+
+    # MONITOR.add_field(name="feet_max_speed", value=feet_max_speed)
+    # MONITOR.add_field(name="feet_max_speed_reward", value=feet_max_speed_reward)
+    # MONITOR.add_field(name="head_height", value=head_y)
+    # MONITOR.add_field(name="head_height_reward", value=head_height_reward)
+
+    torso_speed = float(info.get("torso_speed", 0.0))
+    r += 0.10 * float(np.clip(a=torso_speed, a_min=0.0, a_max=4.0))  # weight small
+    # (2) Alive bonus (small)
     if not (terminated or truncated):
         r += 0.05
-
-    MONITOR.add_field(name="healthy_reward", value=healthy_reward)
-    MONITOR.add_field(name="forward_reward", value=forward_reward)
-    MONITOR.add_field(name="ctrl_cost", value=ctrl_cost)
-    MONITOR.add_field(name="x_velocity", value=x_velocity)
-    MONITOR.add_field(name="x_velocity_reward", value=x_velocity_reward)
-    MONITOR.add_field(name="feet_dist", value=feet_dist)
-    MONITOR.add_field(name="feet_dist_reward", value=feet_dist_reward)
-
-    MONITOR.add_field(name="torso dx", value=torso_dx_val)
-    MONITOR.add_field(name="feet dx", value=(foot_right_dx, foot_left_dx))
-
-    MONITOR.add_field(name="feet_max_speed", value=feet_max_speed)
-    MONITOR.add_field(name="feet_max_speed_reward", value=feet_max_speed_reward)
-    MONITOR.add_field(name="head_height", value=head_y)
-    MONITOR.add_field(name="head_height_reward", value=head_height_reward)
 
     return r
