@@ -8,8 +8,8 @@ env:
   action_repeat: 1
   time_limit: 1000
 
-  obs_h: 64
-  obs_w: 64
+  obs_h: 54
+  obs_w: 54
 
   grayscale: false
 
@@ -40,17 +40,42 @@ env:
   # tobillo + rodilla
   - [+0, +0, +0, +0, +1, -1]   # lean-forward correction (moderate)
   - [+0, +0, +0, +0, -1, +1]   # lean-back correction (strong)
-  - [+0, +1, -1, +0, +0, +0]   # lean-forward correction (moderate)
+  - [+0, +1, -1, +0, +0, +0]   # lean-forward correction (moderate)p
   - [+0, -1, +1, +0, +0, +0]   # lean-back correction (strong)
+
+  # - [+0, +0, +0, +0, +1, +1]
+  # - [+0, +0, +0, +0, -1, -1]
+  # - [+0, +1, +1, +0, +0, +0]
+  # - [+0, -1, -1, +0, +0, +0]
+
+  # - [+0, +0, +0, +1, -1, +0]
+  # - [+0, +0, +0, -1, +1, +0]
+  # - [+1, -1, +0, +0, +0, +0]
+  # - [-1, +1, +0, +0, +0, +0]
+
+  # # COORDINACIÓN SIMÉTRICA
+
+  # # coordinación cadera
+  # - [+1, +0, +0, -1, +0, +0]
+  # - [-1, +0, +0, +1, +0, +0]
+
+  # # cadera + rodilla
+  # - [+1, -1, +0, -1, +1, +0]
+  # - [-1, +1, +0, +1, -1, +0]
+
+  # # cadera + rodilla
+  # - [+1, -1, +0, -1, +1, +0]
+  # - [-1, +1, +0, +1, -1, +0]
+  
 
 train:
   total_steps: 30_000_000
   learning_starts: 2_000
-  train_freq: 4
-  batch_size: 32  # 64
+  train_freq: 10 # 4
+  batch_size: 64 # 32  # 64
   buffer_size: 200_000
   gamma: 0.99
-  lr: 1.0e-4 # 5.0e-5
+  lr: 5.0e-5 # 1.0e-4 # 5.0e-5
   target_update_freq: 8000
   grad_clip_norm: 10.0
 

@@ -1,5 +1,3 @@
-# src/dqn/reward.py
-
 from __future__ import annotations
 
 import gymnasium as gym
@@ -50,6 +48,7 @@ def walker2d_default_reward(
       - default env terms (reward_* and x_velocity)
       - body x/y and dx/dy
       - head x/y and dx/dy
+      - heel x/y for both feet
     """
     healthy_reward: float = float(info.get("reward_survive", 0.0))
     forward_reward: float = float(info.get("reward_forward", 0.0))
@@ -78,12 +77,19 @@ def walker2d_default_reward(
         max(foot_right_dx, foot_left_dx) - max(0.0, torso_dx_val)
     )
 
-    head_y: float = _head_height(info=info)
-
     r: float = 0.0
     r += healthy_reward
     r += forward_reward
     r -= ctrl_cost
+
+    heel_right_y: float = float(info.get("heel_right_y", 0.0))
+    heel_left_y: float = float(info.get("heel_left_y", 0.0))
+    feet_height_reward: float = 0.25 * max(heel_right_y, heel_left_y)
+    # r += feet_height_reward
+    from src.dqn.monitoring import MONITOR
+
+    MONITOR.add_field(name="feet_height_reward", value=feet_height_reward)
+    MONITOR.add_field(name="heel_y", value=(heel_right_y, heel_left_y))
 
     # x_velocity_reward: float
     # x_velocity_reward = 0.02 * float(np.clip(a=x_velocity, a_min=-30.0, a_max=30.0))
@@ -122,10 +128,10 @@ def walker2d_default_reward(
     # MONITOR.add_field(name="head_height", value=head_y)
     # MONITOR.add_field(name="head_height_reward", value=head_height_reward)
 
-    torso_speed = float(info.get("torso_speed", 0.0))
-    r += 0.10 * float(np.clip(a=torso_speed, a_min=0.0, a_max=4.0))  # weight small
-    # (2) Alive bonus (small)
-    if not (terminated or truncated):
-        r += 0.05
+    # torso_speed = float(info.get("torso_speed", 0.0))
+    # r += 0.10 * float(np.clip(a=torso_speed, a_min=0.0, a_max=4.0))  # weight small
+    # # (2) Alive bonus (small)
+    # if not (terminated or truncated):
+    #     r += 0.05
 
     return r
