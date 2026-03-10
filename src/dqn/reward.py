@@ -78,7 +78,7 @@ def walker2d_default_reward(
     )
 
     r: float = 0.0
-    r += healthy_reward
+    r += 1.5 * healthy_reward
     r += forward_reward
     r -= ctrl_cost
 
