@@ -78,13 +78,13 @@ def walker2d_default_reward(
     )
 
     r: float = 0.0
-    r += 1.5 * healthy_reward
-    r += forward_reward
+    r += healthy_reward * 1.2
+    r += forward_reward * 0.5
     r -= ctrl_cost
 
     heel_right_y: float = float(info.get("heel_right_y", 0.0))
     heel_left_y: float = float(info.get("heel_left_y", 0.0))
-    feet_height_reward: float = 0.25 * max(heel_right_y, heel_left_y)
+    feet_height_reward: float = 0.25 * min(heel_right_y, heel_left_y)
     # r += feet_height_reward
     from src.dqn.monitoring import MONITOR
 

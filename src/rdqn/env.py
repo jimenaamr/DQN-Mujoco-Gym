@@ -1,5 +1,3 @@
-# src/rdqn/env.py
-
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -213,6 +211,81 @@ def _argmax_point(points: list[np.ndarray], axis: int) -> np.ndarray | None:
     return best
 
 
+def _argmin_point(points: list[np.ndarray], axis: int) -> np.ndarray | None:
+    """Return point with minimum coordinate on axis, or None."""
+    if not points:
+        return None
+    best: np.ndarray = points[0]
+    best_v: float = float(best[axis])
+    for p in points[1:]:
+        v: float = float(p[axis])
+        if v < best_v:
+            best = p
+            best_v = v
+    return best
+
+
+def _geom_body_id(model: object, geom_id: int) -> int | None:
+    """Return the body id attached to a geom, or None."""
+    try:
+        return int(model.geom_bodyid[geom_id])
+    except Exception:
+        return None
+
+
+def _body_geom_extreme_point(
+    model: object,
+    data: object,
+    body_id: int,
+    axis: int,
+    maximize: bool,
+) -> np.ndarray | None:
+    """Return an extreme world point across all geoms attached to a body."""
+    points: list[np.ndarray] = []
+
+    try:
+        ngeom: int = int(model.ngeom)
+    except Exception:
+        ngeom = 0
+
+    for geom_id in range(ngeom):
+        geom_body_id: int | None = _geom_body_id(model=model, geom_id=geom_id)
+        if geom_body_id != body_id:
+            continue
+        points.extend(_geom_extreme_points(model=model, data=data, geom_id=geom_id))
+
+    if maximize:
+        return _argmax_point(points=points, axis=axis)
+    return _argmin_point(points=points, axis=axis)
+
+
+def _heel_xy(model: object, data: object, body_name: str) -> tuple[float, float] | None:
+    """Return heel (x,y) for a foot body, using the rearmost geom point.
+
+    Convention:
+      - x := MuJoCo x
+      - y := MuJoCo z (vertical)
+
+    For Walker2d, the heel is approximated as the point with minimum x among
+    all extreme points of the geoms attached to the foot body.
+    """
+    body_id: int | None = _mujoco_body_id(model=model, name=body_name)
+    if body_id is None:
+        return None
+
+    heel_xyz: np.ndarray | None = _body_geom_extreme_point(
+        model=model,
+        data=data,
+        body_id=body_id,
+        axis=0,
+        maximize=False,
+    )
+    if heel_xyz is None:
+        return None
+
+    return (float(heel_xyz[0]), float(heel_xyz[2]))
+
+
 def _head_xyz(model: object, data: object) -> np.ndarray | None:
     """Return head xyz as max-z point across all non-plane geoms (best-effort)."""
     head_candidates: list[np.ndarray] = []
@@ -324,6 +397,22 @@ def _build_info(
         # Make sure x_velocity is always consistent with torso_dx.
         if out_name == "torso":
             info["x_velocity"] = float(info.get("torso_dx", 0.0))
+
+    # Heels: use rearmost geom point of each foot body instead of body origin.
+    for foot_body_name, heel_prefix in (
+        ("foot", "heel_right"),
+        ("foot_left", "heel_left"),
+    ):
+        heel_xy: tuple[float, float] | None = _heel_xy(
+            model=model,
+            data=data,
+            body_name=foot_body_name,
+        )
+        if heel_xy is None:
+            continue
+
+        info[f"{heel_prefix}_x"] = float(heel_xy[0])
+        info[f"{heel_prefix}_y"] = float(heel_xy[1])
 
     # Head: position from geom extrema; velocity by finite differences
     head_xyz: np.ndarray | None = _head_xyz(model=model, data=data)

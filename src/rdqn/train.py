@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import time
 from argparse import Namespace
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -469,6 +470,7 @@ def main(
     stabilizer_cfg: StabilizerConfig | None = stabilizer_config_from_yaml(cfg=cfg)
 
     train_env = make_env(spec=env_spec, seed=seed, stabilizer=stabilizer_cfg)
+    live_ep_queue: deque[tuple[float, int, Path]] = deque()
 
     obs_shape_raw: tuple[int, ...] | None = train_env.observation_space.shape
     if obs_shape_raw is None or len(obs_shape_raw) != 3:

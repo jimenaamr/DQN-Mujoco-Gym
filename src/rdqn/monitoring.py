@@ -1,4 +1,4 @@
-# src/rdqn/monitoring.py
+# src/dqn/monitoring.py
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ class MonitoringState:
         self._fields.clear()
 
     def add_field(self, name: str, value: MonitorValue) -> None:
-        """Add a new field.
+        """Add a new field (if monitoring is active).
 
         Args:
             name: Field name.
