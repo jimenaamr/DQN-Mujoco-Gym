@@ -406,8 +406,7 @@ class DQNAgent:
 
         with torch.no_grad():
             x: torch.Tensor = (
-                torch
-                .as_tensor(obs)
+                torch.as_tensor(obs)
                 .unsqueeze(0)
                 .to(
                     device=self.device,
@@ -572,8 +571,7 @@ class DQNAgent:
         with torch.no_grad():
             # Single DQN: select + evaluate with the target network
             q_next: torch.Tensor = (
-                self
-                .q_target(next_obs)  # type: ignore[operator]
+                self.q_target(next_obs)  # type: ignore[operator]
                 .max(dim=1)
                 .values
             )

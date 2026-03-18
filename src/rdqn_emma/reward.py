@@ -86,5 +86,4 @@ def walker2d_default_reward(
     heel_left_y: float = float(info.get("heel_left_y", 0.0))
     feet_height_reward: float = 0.25 * min(heel_right_y, heel_left_y)
 
-
     return r

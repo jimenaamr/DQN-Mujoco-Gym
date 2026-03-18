@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from dataclasses import dataclass
 from typing import Any
 
+
 @dataclass
 class RDQNConfig:
     gamma: float
@@ -17,7 +18,7 @@ class RDQNConfig:
     target_update_freq: int
     grad_clip_norm: float
     device: str
-    noisy_sigma0: float 
+    noisy_sigma0: float
     n_step: int
     prio_alpha: float
     prio_beta_start: float
@@ -28,10 +29,13 @@ class RDQNConfig:
     v_max: float
     n_atoms: int
 
+
 # --- ESTRUCTURAS PARA PRIORITIZED EXPERIENCE REPLAY (PER) ---
+
 
 class SumTree:
     """Estructura de datos para muestreo eficiente O(log n)."""
+
     def __init__(self, capacity: int):
         self.capacity = capacity
         self.tree = np.zeros(2 * capacity - 1)
@@ -76,8 +80,10 @@ class SumTree:
         data_idx = idx - self.capacity + 1
         return idx, self.tree[idx], self.data[data_idx]
 
+
 class PrioritizedReplayBuffer:
     """Buffer PER integrado para evitar dependencias externas."""
+
     def __init__(self, capacity: int, alpha: float, eps: float):
         self.tree = SumTree(capacity)
         self.alpha = alpha
@@ -89,8 +95,9 @@ class PrioritizedReplayBuffer:
 
     def add(self, obs, action, reward, next_obs, done):
         # Nuevas transiciones entran con prioridad máxima
-        max_p = np.max(self.tree.tree[-self.tree.capacity:])
-        if max_p == 0: max_p = 1.0
+        max_p = np.max(self.tree.tree[-self.tree.capacity :])
+        if max_p == 0:
+            max_p = 1.0
         self.tree.add(max_p, (obs, action, reward, next_obs, done))
 
     def sample(self, batch_size: int, beta: float):
@@ -115,10 +122,13 @@ class PrioritizedReplayBuffer:
         # Desempaquetar batch
         obs, actions, rewards, next_obs, dones = zip(*batch)
         return {
-            "obs": np.array(obs), "actions": np.array(actions),
-            "rewards": np.array(rewards), "next_obs": np.array(next_obs),
-            "dones": np.array(dones), "indices": idxs,
-            "weights": is_weights.astype(np.float32)
+            "obs": np.array(obs),
+            "actions": np.array(actions),
+            "rewards": np.array(rewards),
+            "next_obs": np.array(next_obs),
+            "dones": np.array(dones),
+            "indices": idxs,
+            "weights": is_weights.astype(np.float32),
         }
 
     def update_priorities(self, idxs: list[int], errors: np.ndarray):
@@ -126,13 +136,20 @@ class PrioritizedReplayBuffer:
             p = self._get_priority(error)
             self.tree.update(idx, p)
 
+
 # --- ARQUITECTURA RAINBOW ---
+
 
 class NoisyLinear(nn.Module):
     """Capa Noisy Linear para exploración paramétrica[cite: 69, 75]."""
+
     def __init__(self, in_features: int, out_features: int, std_init: float = 0.5):
         super().__init__()
-        self.in_features, self.out_features, self.std_init = in_features, out_features, std_init
+        self.in_features, self.out_features, self.std_init = (
+            in_features,
+            out_features,
+            std_init,
+        )
         self.weight_mu = nn.Parameter(torch.empty(out_features, in_features))
         self.weight_sigma = nn.Parameter(torch.empty(out_features, in_features))
         self.register_buffer("weight_epsilon", torch.empty(out_features, in_features))
@@ -161,29 +178,45 @@ class NoisyLinear(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if self.training:
-            return F.linear(x, self.weight_mu + self.weight_sigma * self.weight_epsilon,
-                            self.bias_mu + self.bias_sigma * self.bias_epsilon)
+            return F.linear(
+                x,
+                self.weight_mu + self.weight_sigma * self.weight_epsilon,
+                self.bias_mu + self.bias_sigma * self.bias_epsilon,
+            )
         return F.linear(x, self.weight_mu, self.bias_mu)
+
 
 class _RainbowNet(nn.Module):
     """Dueling Distributional Network[cite: 66, 68, 70]."""
+
     def __init__(self, obs_shape, n_actions, n_atoms, v_min, v_max, noisy_std):
         super().__init__()
         c, h, w = obs_shape
         self.n_actions, self.n_atoms = n_actions, n_atoms
         self.conv = nn.Sequential(
-            nn.Conv2d(c, 16, 8, stride=4), nn.SiLU(),
-            nn.Conv2d(16, 32, 4, stride=2), nn.SiLU(),
+            nn.Conv2d(c, 16, 8, stride=4),
+            nn.SiLU(),
+            nn.Conv2d(16, 32, 4, stride=2),
+            nn.SiLU(),
         )
         with torch.no_grad():
             flat_dim = self.conv(torch.zeros(1, c, h, w)).flatten(1).shape[1]
 
         self.register_buffer("support", torch.linspace(v_min, v_max, n_atoms))
-        self.value_stream = nn.Sequential(NoisyLinear(flat_dim, 256, noisy_std), nn.ReLU(), NoisyLinear(256, n_atoms, noisy_std))
-        self.advantage_stream = nn.Sequential(NoisyLinear(flat_dim, 256, noisy_std), nn.ReLU(), NoisyLinear(256, n_actions * n_atoms, noisy_std))
+        self.value_stream = nn.Sequential(
+            NoisyLinear(flat_dim, 256, noisy_std),
+            nn.ReLU(),
+            NoisyLinear(256, n_atoms, noisy_std),
+        )
+        self.advantage_stream = nn.Sequential(
+            NoisyLinear(flat_dim, 256, noisy_std),
+            nn.ReLU(),
+            NoisyLinear(256, n_actions * n_atoms, noisy_std),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if x.dtype == torch.uint8: x = x.float() / 255.0
+        if x.dtype == torch.uint8:
+            x = x.float() / 255.0
         x = self.conv(x).flatten(1)
         dist_v = self.value_stream(x).view(-1, 1, self.n_atoms)
         dist_a = self.advantage_stream(x).view(-1, self.n_actions, self.n_atoms)
@@ -193,16 +226,24 @@ class _RainbowNet(nn.Module):
     def get_q_values(self, x: torch.Tensor) -> torch.Tensor:
         return (self.forward(x) * self.support).sum(2)
 
+
 class RDQNAgent:
     """Agente Rainbow optimizado y autocontenido."""
+
     def __init__(self, obs_shape, n_actions, cfg: RDQNConfig):
         self.cfg = cfg
         self.device = torch.device(cfg.device)
-        self.q = _RainbowNet(obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0).to(self.device)
-        self.q_target = _RainbowNet(obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0).to(self.device)
+        self.q = _RainbowNet(
+            obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0
+        ).to(self.device)
+        self.q_target = _RainbowNet(
+            obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0
+        ).to(self.device)
         self.q_target.load_state_dict(self.q.state_dict())
         self.opt = torch.optim.Adam(self.q.parameters(), lr=cfg.lr, eps=1.5e-4)
-        self.buffer = PrioritizedReplayBuffer(cfg.buffer_size, cfg.prio_alpha, cfg.prio_eps)
+        self.buffer = PrioritizedReplayBuffer(
+            cfg.buffer_size, cfg.prio_alpha, cfg.prio_eps
+        )
         self.global_step, self.updates = 0, 0
 
     @torch.no_grad()
@@ -216,10 +257,19 @@ class RDQNAgent:
         self.buffer.add(obs, action, reward, next_obs, done)
 
     def can_update(self) -> bool:
-        return self.global_step >= self.cfg.learning_starts and (self.global_step % self.cfg.train_freq) == 0
+        return (
+            self.global_step >= self.cfg.learning_starts
+            and (self.global_step % self.cfg.train_freq) == 0
+        )
 
     def update(self) -> dict[str, float]:
-        beta = min(1.0, self.cfg.prio_beta_start + self.global_step * (1.0 - self.cfg.prio_beta_start) / self.cfg.prio_beta_steps)
+        beta = min(
+            1.0,
+            self.cfg.prio_beta_start
+            + self.global_step
+            * (1.0 - self.cfg.prio_beta_start)
+            / self.cfg.prio_beta_steps,
+        )
         batch = self.buffer.sample(self.cfg.batch_size, beta)
         obs = torch.as_tensor(batch["obs"]).to(self.device, non_blocking=True)
         next_obs = torch.as_tensor(batch["next_obs"]).to(self.device, non_blocking=True)
@@ -231,12 +281,17 @@ class RDQNAgent:
         with torch.no_grad():
             next_action = self.q.get_q_values(next_obs).argmax(1)
             next_dist = self.q_target(next_obs)[range(self.cfg.batch_size), next_action]
-            
+
             # Proyección categórica vectorizada (Optimización x10) [cite: 68, 76]
             dones_float = dones.unsqueeze(1).to(torch.float32)
-            target_z = rewards.unsqueeze(1) + (1.0 - dones_float) * (self.cfg.gamma**self.cfg.n_step) * self.q.support
+            target_z = (
+                rewards.unsqueeze(1)
+                + (1.0 - dones_float)
+                * (self.cfg.gamma**self.cfg.n_step)
+                * self.q.support
+            )
             target_z = target_z.clamp(self.cfg.v_min, self.cfg.v_max)
-        
+
             delta_z = (self.cfg.v_max - self.cfg.v_min) / (self.cfg.n_atoms - 1)
             b = (target_z - self.cfg.v_min) / delta_z
             l, u = b.floor().long(), b.ceil().long()
@@ -244,31 +299,51 @@ class RDQNAgent:
             u[(l < (self.cfg.n_atoms - 1)) * (l == u)] += 1
 
             m = torch.zeros(self.cfg.batch_size, self.cfg.n_atoms, device=self.device)
-            offset = torch.linspace(0, (self.cfg.batch_size - 1) * self.cfg.n_atoms, self.cfg.batch_size, device=self.device).long().unsqueeze(1)
-            m.view(-1).index_add_(0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1).float())
-            m.view(-1).index_add_(0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1).float())
+            offset = (
+                torch.linspace(
+                    0,
+                    (self.cfg.batch_size - 1) * self.cfg.n_atoms,
+                    self.cfg.batch_size,
+                    device=self.device,
+                )
+                .long()
+                .unsqueeze(1)
+            )
+            m.view(-1).index_add_(
+                0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1).float()
+            )
+            m.view(-1).index_add_(
+                0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1).float()
+            )
 
         dist = self.q(obs)[range(self.cfg.batch_size), actions]
-        dist = dist.clamp(min=1e-9) # Seguridad adicional contra ceros
+        dist = dist.clamp(min=1e-9)  # Seguridad adicional contra ceros
         log_p = torch.log(dist)
         loss = (-(m * log_p).sum(dim=1) * weights).mean()
 
         self.opt.zero_grad(set_to_none=True)
         loss.backward()
-        if self.cfg.grad_clip_norm > 0: nn.utils.clip_grad_norm_(self.q.parameters(), self.cfg.grad_clip_norm)
+        if self.cfg.grad_clip_norm > 0:
+            nn.utils.clip_grad_norm_(self.q.parameters(), self.cfg.grad_clip_norm)
         self.opt.step()
 
         self.updates += 1
-        if self.updates % self.cfg.target_update_freq == 0: self.q_target.load_state_dict(self.q.state_dict())
-        self.buffer.update_priorities(batch["indices"], (-(m * log_p).sum(dim=1)).detach().cpu().numpy())
+        if self.updates % self.cfg.target_update_freq == 0:
+            self.q_target.load_state_dict(self.q.state_dict())
+        self.buffer.update_priorities(
+            batch["indices"], (-(m * log_p).sum(dim=1)).detach().cpu().numpy()
+        )
         self._reset_noise()
         return {"loss": loss.item()}
 
     def _reset_noise(self):
         for m in self.q.modules():
-            if isinstance(m, NoisyLinear): m.reset_noise()
+            if isinstance(m, NoisyLinear):
+                m.reset_noise()
 
-    def save(self, path: str): torch.save({"q": self.q.state_dict(), "step": self.global_step}, path)
+    def save(self, path: str):
+        torch.save({"q": self.q.state_dict(), "step": self.global_step}, path)
+
     def load(self, path: str) -> int:
         ckpt = torch.load(path, map_location=self.device)
         self.q.load_state_dict(ckpt["q"])

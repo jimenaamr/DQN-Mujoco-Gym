@@ -358,25 +358,31 @@ class MetricViewer:
         """Apply layout positions so _UI_GAP affects right-panel paddings too."""
         rects: dict[str, float] = self._right_panel_rects()
 
-        self.ax_plot.set_position([
-            rects["plot_left"],
-            rects["plot_bottom"],
-            rects["plot_width"],
-            rects["plot_height"],
-        ])
-        self.ax_status.set_position([
-            rects["status_left"],
-            rects["status_bottom"],
-            rects["status_width"],
-            rects["status_height"],
-        ])
+        self.ax_plot.set_position(
+            [
+                rects["plot_left"],
+                rects["plot_bottom"],
+                rects["plot_width"],
+                rects["plot_height"],
+            ]
+        )
+        self.ax_status.set_position(
+            [
+                rects["status_left"],
+                rects["status_bottom"],
+                rects["status_width"],
+                rects["status_height"],
+            ]
+        )
         if self.smooth_slider is not None:
-            self.smooth_slider.ax.set_position([
-                rects["slider_left"],
-                rects["slider_bottom"],
-                rects["slider_width"],
-                rects["slider_height"],
-            ])
+            self.smooth_slider.ax.set_position(
+                [
+                    rects["slider_left"],
+                    rects["slider_bottom"],
+                    rects["slider_width"],
+                    rects["slider_height"],
+                ]
+            )
 
         self.fig.canvas.draw_idle()
 
@@ -454,12 +460,14 @@ class MetricViewer:
 
         rects: dict[str, float] = self._right_panel_rects()
 
-        self.ax_plot = self.fig.add_axes([
-            rects["plot_left"],
-            rects["plot_bottom"],
-            rects["plot_width"],
-            rects["plot_height"],
-        ])
+        self.ax_plot = self.fig.add_axes(
+            [
+                rects["plot_left"],
+                rects["plot_bottom"],
+                rects["plot_width"],
+                rects["plot_height"],
+            ]
+        )
         self.ax_plot.set_xlabel("step")
         self.ax_plot.set_ylabel("value")
         self.ax_plot.grid(True, which="both", linewidth=0.6)
@@ -481,12 +489,14 @@ class MetricViewer:
         )
         self.ax_plot.legend(loc="upper right", frameon=True)
 
-        self.ax_status = self.fig.add_axes([
-            rects["status_left"],
-            rects["status_bottom"],
-            rects["status_width"],
-            rects["status_height"],
-        ])
+        self.ax_status = self.fig.add_axes(
+            [
+                rects["status_left"],
+                rects["status_bottom"],
+                rects["status_width"],
+                rects["status_height"],
+            ]
+        )
         self.ax_status.set_axis_off()
 
         self._reload_all(initial=True)
@@ -554,12 +564,14 @@ class MetricViewer:
 
         if len(self.runs) > 1:
             runs_title_h: float = 0.03
-            rax_title: Axes = self.fig.add_axes([
-                left_x,
-                y - runs_title_h,
-                left_w,
-                runs_title_h,
-            ])
+            rax_title: Axes = self.fig.add_axes(
+                [
+                    left_x,
+                    y - runs_title_h,
+                    left_w,
+                    runs_title_h,
+                ]
+            )
             rax_title.set_axis_off()
             self._runs_title = rax_title.text(
                 0.0,
@@ -578,12 +590,14 @@ class MetricViewer:
             y -= runs_h + gap
 
         tags_title_h: float = 0.03
-        tax_title: Axes = self.fig.add_axes([
-            left_x,
-            y - tags_title_h,
-            left_w,
-            tags_title_h,
-        ])
+        tax_title: Axes = self.fig.add_axes(
+            [
+                left_x,
+                y - tags_title_h,
+                left_w,
+                tags_title_h,
+            ]
+        )
         tax_title.set_axis_off()
         self._tags_title = tax_title.text(
             0.0,
@@ -604,12 +618,14 @@ class MetricViewer:
         self.radio_tag.on_clicked(self._on_tag_clicked)
 
         rects: dict[str, float] = self._right_panel_rects()
-        sax: Axes = self.fig.add_axes([
-            rects["slider_left"],
-            rects["slider_bottom"],
-            rects["slider_width"],
-            rects["slider_height"],
-        ])
+        sax: Axes = self.fig.add_axes(
+            [
+                rects["slider_left"],
+                rects["slider_bottom"],
+                rects["slider_width"],
+                rects["slider_height"],
+            ]
+        )
         self.smooth_slider = Slider(
             ax=sax,
             label="smoothing",

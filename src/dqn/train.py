@@ -528,13 +528,15 @@ def main(
     _write_text_atomic(path=pid_file, text=f"{int(os.getpid())}\n")
     _write_text_atomic(
         path=meta_file,
-        text=yaml.safe_dump({
-            "pid": int(os.getpid()),
-            "created_at_epoch_s": float(created_at_epoch_s),
-            "run_path": str(run_path),
-            "run_name": str(run_name),
-            "env_dt_s": _maybe_env_dt_s(env=train_env),
-        }),
+        text=yaml.safe_dump(
+            {
+                "pid": int(os.getpid()),
+                "created_at_epoch_s": float(created_at_epoch_s),
+                "run_path": str(run_path),
+                "run_name": str(run_name),
+                "env_dt_s": _maybe_env_dt_s(env=train_env),
+            }
+        ),
     )
 
     # --- live_frames export (used by live_visualization.py / live_monitoring.py) ---
@@ -730,11 +732,13 @@ def main(
                     episode_frame_idx = 0
 
                     # Remove episode dirs that are older than LIVE_CLEANUP_TIMER seconds
-                    live_ep_queue.append((
-                        float(time.time()),
-                        int(episode_idx),
-                        episode_dir,
-                    ))
+                    live_ep_queue.append(
+                        (
+                            float(time.time()),
+                            int(episode_idx),
+                            episode_dir,
+                        )
+                    )
                     now_s: float = float(time.time())
                     cutoff_s: float = now_s - float(LIVE_CLEANUP_TIMER)
 

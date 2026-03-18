@@ -11,20 +11,12 @@ graphics_backend: str = auto_detect_mujoco_gl()
 os.environ.setdefault(key="MUJOCO_GL", value=graphics_backend)
 
 import re
-import shutil
-import signal
-import socket
 import subprocess
 import tempfile
-import time
-from argparse import Namespace
-from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import cv2
-import numpy as np
 import yaml
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -51,7 +43,6 @@ def resolve_device(name: str) -> str:
     Raises:
         ValueError: If `name` is not one of {"cpu", "gpu"}.
     """
-    import torch
 
     normalized: str = str(name).strip().lower()
     if normalized == "cpu":
@@ -60,9 +51,11 @@ def resolve_device(name: str) -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
     raise ValueError(f"Invalid device '{name}'. Use 'cpu' or 'gpu'.")
 
+
 def load_yaml(path: str) -> dict[str, Any]:
     with open(file=path, encoding="utf-8") as f:
         return yaml.safe_load(stream=f)
+
 
 def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
     e: dict[str, Any] = cfg["env"]
@@ -76,6 +69,7 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
         obs_w=int(e.get("obs_w", 84)),
         grayscale=bool(e.get("grayscale")),
     )
+
 
 def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
     t: dict[str, Any] = cfg["train"]
@@ -101,60 +95,86 @@ def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
         prio_eps=float(r["prio_eps"]),
         v_min=float(r["v_min"]),
         v_max=float(r["v_max"]),
-        n_atoms=int(r["n_atoms"])
+        n_atoms=int(r["n_atoms"]),
     )
 
+
 def resolve_resume_path(resume: str | None) -> Path | None:
-    if resume is None: return None
+    if resume is None:
+        return None
     p = Path(resume).expanduser()
-    if p.is_file(): return p
+    if p.is_file():
+        return p
     if p.is_dir():
         ckpt_files = list(p.glob("*.pt"))
-        if not ckpt_files: return None
+        if not ckpt_files:
+            return None
         return max(ckpt_files, key=os.path.getmtime)
     return None
+
 
 def _infer_run_name_from_checkpoint(ckpt_file: Path) -> str | None:
     parent = ckpt_file.parent
     return str(parent.name) if parent.name else None
 
+
 # --- FUNCIONES AUXILIARES ---
+
 
 def _ensure_rdqn_subdir(root: str) -> str:
     p: Path = Path(root)
     return str(p) if "rdqn" in p.parts else str(p / "rdqn")
 
+
 def _run_eval_in_subprocess(config_path, checkpoint_path, seed, episodes, video_dir):
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path = os.path.join(tmpdir, "eval_return.txt")
-        cmd = ["python", "-m", "src.rdqn_emma.eval_worker", "--config", config_path, 
-               "--checkpoint", checkpoint_path, "--seed", str(seed), 
-               "--episodes", str(episodes), "--video-dir", video_dir, "--output-path", out_path]
+        cmd = [
+            "python",
+            "-m",
+            "src.rdqn_emma.eval_worker",
+            "--config",
+            config_path,
+            "--checkpoint",
+            checkpoint_path,
+            "--seed",
+            str(seed),
+            "--episodes",
+            str(episodes),
+            "--video-dir",
+            video_dir,
+            "--output-path",
+            out_path,
+        ]
         env = dict(os.environ)
         env["DQN_MONITOR_DISABLED"] = "1"
         subprocess.run(cmd, check=True, env=env)
         with open(out_path, "r") as f:
             return float(f.read().strip())
 
+
 # --- MAIN ---
 
-def main(config_path: str, resume_path: str | None = None, new_run: bool = False) -> None:
+
+def main(
+    config_path: str, resume_path: str | None = None, new_run: bool = False
+) -> None:
     cfg = load_yaml(config_path)
     seed = int(cfg["seed"])
-    
+
     env_spec = to_env_spec(cfg)
     # Se elimina la dependencia de stabilizer_config_from_yaml
     train_env = make_env(spec=env_spec, seed=seed, stabilizer=None)
-    
+
     obs_shape = tuple(train_env.observation_space.shape)
     n_actions = int(train_env.action_space.n)
-    
+
     rdqn_cfg = to_rdqn_cfg(cfg)
     agent = RDQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=rdqn_cfg)
 
     # Asegurar nombres de redes correctos para RDQNAgent optimizado
     agent.q.train()
-    agent.q_target.eval() 
+    agent.q_target.eval()
 
     run_dir = _ensure_rdqn_subdir(str(cfg["logging"]["run_dir"]))
     ckpt_dir = _ensure_rdqn_subdir(str(cfg["logging"]["ckpt_dir"]))
@@ -163,7 +183,9 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
 
     resume_ckpt = resolve_resume_path(resume_path)
     if resume_ckpt and not new_run:
-        run_name = _infer_run_name_from_checkpoint(resume_ckpt) or f"{env_spec.env_id}_resume"
+        run_name = (
+            _infer_run_name_from_checkpoint(resume_ckpt) or f"{env_spec.env_id}_resume"
+        )
     else:
         run_name = f"{env_spec.env_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
@@ -193,13 +215,13 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
 
     for step in trange(start_step, total_steps, desc="Rainbow Training"):
         agent.global_step = step
-        
+
         action = agent.act(obs, eval_mode=False)
         next_obs, reward, terminated, truncated, _ = train_env.step(action)
         done = terminated or truncated
-        
+
         agent.store(obs, action, reward, next_obs, done)
-        
+
         ep_ret += reward
         ep_len += 1
         obs = next_obs
@@ -220,10 +242,16 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
         if step > 0 and step % eval_every == 0:
             ckpt_file = os.path.join(ckpt_path, f"step_{step}.pt")
             agent.save(ckpt_file)
-            
+
             video_dir = os.path.join("videos", "rdqn", run_name, f"step_{step}")
-            eval_ret = _run_eval_in_subprocess(config_path, ckpt_file, seed+100, int(cfg["eval"]["episodes"]), video_dir)
-            
+            eval_ret = _run_eval_in_subprocess(
+                config_path,
+                ckpt_file,
+                seed + 100,
+                int(cfg["eval"]["episodes"]),
+                video_dir,
+            )
+
             writer.add_scalar("eval/return_mean", eval_ret, step)
             if eval_ret > best_eval:
                 best_eval = eval_ret
@@ -232,8 +260,10 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
     train_env.close()
     writer.close()
 
+
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/rdqn.yaml")
     parser.add_argument("--resume", type=str, default=None)
