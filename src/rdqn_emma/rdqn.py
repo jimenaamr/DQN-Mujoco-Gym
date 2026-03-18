@@ -232,7 +232,9 @@ class RDQNAgent:
             next_dist = self.q_target(next_obs)[range(self.cfg.batch_size), next_action]
             
             # Proyección categórica vectorizada (Optimización x10) [cite: 68, 76]
-            target_z = rewards.unsqueeze(1) + (1 - dones.unsqueeze(1)) * (self.cfg.gamma**self.cfg.n_step) * self.q.support
+            # Aseguramos que dones sea float antes de la resta
+            dones_float = dones.unsqueeze(1).to(torch.float32)
+            target_z = rewards.unsqueeze(1) + (1.0 - dones_float) * (self.cfg.gamma**self.cfg.n_step) * self.q.support
             target_z = target_z.clamp(self.cfg.v_min, self.cfg.v_max)
             b = (target_z - self.cfg.v_min) / ((self.cfg.v_max - self.cfg.v_min) / (self.cfg.n_atoms - 1))
             l, u = b.floor().long(), b.ceil().long()
