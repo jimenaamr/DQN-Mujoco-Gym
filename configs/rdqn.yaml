@@ -181,8 +181,8 @@ train:
 # Rainbow-specific parameters
 rainbow:
   # Distributional (C51)
-  v_min: -10.0
-  v_max: 10.0
+  v_min: -5.0
+  v_max: 150.0
   n_atoms: 51
 
   # N-step returns
@@ -208,9 +208,3 @@ logging:
   ckpt_dir: "checkpoints"
   log_every: 200_000
   live_frames: true
-
-stabilizer:
-  initial_intensity: 0.01
-  decay: 0.1
-  ref_height: 0.95
-  ref_fw: 0.0
