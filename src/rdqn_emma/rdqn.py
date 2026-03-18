@@ -208,7 +208,8 @@ class RDQNAgent:
     @torch.no_grad()
     def act(self, obs: np.ndarray, eval_mode: bool = False) -> int:
         self.q.eval() if eval_mode else self.q.train()
-        x = torch.as_tensor(obs, device=self.device).unsqueeze(0)
+        # Asegurar que la observación se convierta a tensor en el dispositivo correcto
+        x = torch.as_tensor(obs, device=self.device, dtype=torch.uint8).unsqueeze(0)
         return int(self.q.get_q_values(x).argmax(1).item())
 
     def store(self, obs, action, reward, next_obs, done):
@@ -232,21 +233,24 @@ class RDQNAgent:
             next_dist = self.q_target(next_obs)[range(self.cfg.batch_size), next_action]
             
             # Proyección categórica vectorizada (Optimización x10) [cite: 68, 76]
-            # Aseguramos que dones sea float antes de la resta
             dones_float = dones.unsqueeze(1).to(torch.float32)
             target_z = rewards.unsqueeze(1) + (1.0 - dones_float) * (self.cfg.gamma**self.cfg.n_step) * self.q.support
             target_z = target_z.clamp(self.cfg.v_min, self.cfg.v_max)
-            b = (target_z - self.cfg.v_min) / ((self.cfg.v_max - self.cfg.v_min) / (self.cfg.n_atoms - 1))
+        
+            delta_z = (self.cfg.v_max - self.cfg.v_min) / (self.cfg.n_atoms - 1)
+            b = (target_z - self.cfg.v_min) / delta_z
             l, u = b.floor().long(), b.ceil().long()
             l[(u > 0) * (l == u)] -= 1
             u[(l < (self.cfg.n_atoms - 1)) * (l == u)] += 1
 
             m = torch.zeros(self.cfg.batch_size, self.cfg.n_atoms, device=self.device)
             offset = torch.linspace(0, (self.cfg.batch_size - 1) * self.cfg.n_atoms, self.cfg.batch_size, device=self.device).long().unsqueeze(1)
-            m.view(-1).index_add_(0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1))
-            m.view(-1).index_add_(0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1))
+            m.view(-1).index_add_(0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1).float())
+            m.view(-1).index_add_(0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1).float())
 
-        log_p = torch.log(self.q(obs)[range(self.cfg.batch_size), actions] + 1e-9)
+        dist = self.q(obs)[range(self.cfg.batch_size), actions]
+        dist = dist.clamp(min=1e-9) # Seguridad adicional contra ceros
+        log_p = torch.log(dist)
         loss = (-(m * log_p).sum(dim=1) * weights).mean()
 
         self.opt.zero_grad(set_to_none=True)
