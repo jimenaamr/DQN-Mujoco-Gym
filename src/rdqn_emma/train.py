@@ -1,5 +1,7 @@
 # src/rdqn/train.py
 
+# src/rdqn_emma/train.py
+
 from __future__ import annotations
 import os
 from src.utils.backends import auto_detect_mujoco_gl
@@ -24,23 +26,39 @@ from typing import Any
 import cv2
 import numpy as np
 import yaml
-import torch # Añadido para verificaciones de dispositivo
+import torch
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
-from src.rdqn.env import EnvSpec, make_env
-from src.rdqn.helper import (
-    StabilizerConfig,
-    resolve_device,
-    stabilizer_config_from_yaml,
-)
-from src.rdqn.monitoring import MONITOR
-from src.rdqn.rdqn import RDQNAgent, RDQNConfig # Importa la clase optimizada
-from src.utils.tensorboard import launch_tensorboard
+from src.rdqn_emma.env import EnvSpec, make_env
+from src.rdqn_emma.monitoring import MONITOR
+from src.rdqn_emma.rdqn import RDQNAgent, RDQNConfig
 
 LIVE_CLEANUP_TIMER: float = 120.0
 _STEP_RE: re.Pattern[str] = re.compile(pattern=r"^step_(\d+)_.*\.pt$")
 _STEP_ANYWHERE_RE: re.Pattern[str] = re.compile(pattern=r"step_(\d+)_.*\.pt$")
+
+
+def resolve_device(name: str) -> str:
+    """Resolve a user-facing device option into a torch device string.
+
+    Args:
+        name: User-provided device name. Allowed: "cpu", "gpu".
+
+    Returns:
+        "cpu" or "cuda" (if available) depending on `name`.
+
+    Raises:
+        ValueError: If `name` is not one of {"cpu", "gpu"}.
+    """
+    import torch
+
+    normalized: str = str(name).strip().lower()
+    if normalized == "cpu":
+        return "cpu"
+    if normalized == "gpu":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    raise ValueError(f"Invalid device '{name}'. Use 'cpu' or 'gpu'.")
 
 def load_yaml(path: str) -> dict[str, Any]:
     with open(file=path, encoding="utf-8") as f:
@@ -60,10 +78,9 @@ def to_env_spec(cfg: dict[str, Any]) -> EnvSpec:
     )
 
 def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
-    """Mapea el YAML a la RDQNConfig optimizada."""
     t: dict[str, Any] = cfg["train"]
     r: dict[str, Any] = cfg["rainbow"]
-    device_resolved: str = resolve_device(name=str(cfg.get("device", "cpu")))
+    device_resolved = resolve_device(name=str(cfg.get("device", "cpu")))
 
     return RDQNConfig(
         gamma=float(t["gamma"]),
@@ -75,7 +92,6 @@ def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
         target_update_freq=int(t["target_update_freq"]),
         grad_clip_norm=float(t["grad_clip_norm"]),
         device=str(device_resolved),
-        # Rainbow specific - nombres sincronizados con el código optimizado
         noisy_sigma0=float(r["noisy_sigma0"]),
         n_step=int(r["n_step"]),
         prio_alpha=float(r["prio_alpha"]),
@@ -88,30 +104,30 @@ def to_rdqn_cfg(cfg: dict[str, Any]) -> RDQNConfig:
         n_atoms=int(r["n_atoms"])
     )
 
-# ... (Mantenemos las funciones auxiliares de guardado de imágenes y frames igual) ...
+def resolve_resume_path(resume: str | None) -> Path | None:
+    if resume is None: return None
+    p = Path(resume).expanduser()
+    if p.is_file(): return p
+    if p.is_dir():
+        ckpt_files = list(p.glob("*.pt"))
+        if not ckpt_files: return None
+        return max(ckpt_files, key=os.path.getmtime)
+    return None
+
+def _infer_run_name_from_checkpoint(ckpt_file: Path) -> str | None:
+    parent = ckpt_file.parent
+    return str(parent.name) if parent.name else None
+
+# --- FUNCIONES AUXILIARES ---
+
 def _ensure_rdqn_subdir(root: str) -> str:
     p: Path = Path(root)
     return str(p) if "rdqn" in p.parts else str(p / "rdqn")
 
-def _extract_last_rgb_frame(obs: np.ndarray) -> np.ndarray:
-    c = int(obs.shape[0])
-    if c >= 3:
-        return np.transpose(obs[c-3:c, :, :], (1, 2, 0))
-    gray = obs[c-1, :, :]
-    return np.stack((gray, gray, gray), axis=-1)
-
-def _write_jpg_atomic(path: Path, frame_rgb: np.ndarray, quality: int = 90) -> None:
-    frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-    ok, buf = cv2.imencode(".jpg", frame_bgr, [int(cv2.IMWRITE_JPEG_QUALITY), quality])
-    if ok:
-        tmp = path.with_suffix(".jpg.tmp")
-        tmp.write_bytes(buf.tobytes())
-        tmp.replace(path)
-
 def _run_eval_in_subprocess(config_path, checkpoint_path, seed, episodes, video_dir):
     with tempfile.TemporaryDirectory() as tmpdir:
         out_path = os.path.join(tmpdir, "eval_return.txt")
-        cmd = ["python", "-m", "src.rdqn.eval_worker", "--config", config_path, 
+        cmd = ["python", "-m", "src.rdqn_emma.eval_worker", "--config", config_path, 
                "--checkpoint", checkpoint_path, "--seed", str(seed), 
                "--episodes", str(episodes), "--video-dir", video_dir, "--output-path", out_path]
         env = dict(os.environ)
@@ -120,33 +136,31 @@ def _run_eval_in_subprocess(config_path, checkpoint_path, seed, episodes, video_
         with open(out_path, "r") as f:
             return float(f.read().strip())
 
+# --- MAIN ---
+
 def main(config_path: str, resume_path: str | None = None, new_run: bool = False) -> None:
     cfg = load_yaml(config_path)
     seed = int(cfg["seed"])
     
     env_spec = to_env_spec(cfg)
-    stabilizer_cfg = stabilizer_config_from_yaml(cfg)
-    train_env = make_env(spec=env_spec, seed=seed, stabilizer=stabilizer_cfg)
+    # Se elimina la dependencia de stabilizer_config_from_yaml
+    train_env = make_env(spec=env_spec, seed=seed, stabilizer=None)
     
-    obs_shape = tuple(train_env.observation_space.shape) # (C, H, W)
+    obs_shape = tuple(train_env.observation_space.shape)
     n_actions = int(train_env.action_space.n)
     
     rdqn_cfg = to_rdqn_cfg(cfg)
     agent = RDQNAgent(obs_shape=obs_shape, n_actions=n_actions, cfg=rdqn_cfg)
 
-    # --- CORRECCIÓN DE NOMBRES DE REDES ---
+    # Asegurar nombres de redes correctos para RDQNAgent optimizado
     agent.q.train()
-    agent.q_target.eval() # Cambiado de q_targ a q_target para RDQN optimizado
-    # --------------------------------------
+    agent.q_target.eval() 
 
-    # Gestión de directorios y nombres de ejecución
     run_dir = _ensure_rdqn_subdir(str(cfg["logging"]["run_dir"]))
     ckpt_dir = _ensure_rdqn_subdir(str(cfg["logging"]["ckpt_dir"]))
     os.makedirs(run_dir, exist_ok=True)
     os.makedirs(ckpt_dir, exist_ok=True)
 
-    # Lógica de Resume corregida
-    from src.rdqn.train import resolve_resume_path, _infer_run_name_from_checkpoint
     resume_ckpt = resolve_resume_path(resume_path)
     if resume_ckpt and not new_run:
         run_name = _infer_run_name_from_checkpoint(resume_ckpt) or f"{env_spec.env_id}_resume"
@@ -165,7 +179,6 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
     log_every = int(cfg["logging"]["log_every"])
     eval_every = int(cfg["eval"]["every_steps"])
 
-    # Cargar checkpoint si existe
     start_step = 0
     if resume_ckpt:
         start_step = agent.load(str(resume_ckpt))
@@ -178,24 +191,19 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
     best_eval = -1e18
     episode_idx = 0
 
-    # Bucle de entrenamiento principal
     for step in trange(start_step, total_steps, desc="Rainbow Training"):
         agent.global_step = step
         
-        # Selección de acción (Noisy Net maneja exploración)
         action = agent.act(obs, eval_mode=False)
-        
-        next_obs, reward, terminated, truncated, info = train_env.step(action)
+        next_obs, reward, terminated, truncated, _ = train_env.step(action)
         done = terminated or truncated
         
-        # Guardar en buffer (n-step y PER se gestionan dentro del agente/buffer)
         agent.store(obs, action, reward, next_obs, done)
         
         ep_ret += reward
         ep_len += 1
         obs = next_obs
 
-        # Actualización del modelo
         if agent.can_update():
             metrics = agent.update()
             if step % log_every == 0:
@@ -209,7 +217,6 @@ def main(config_path: str, resume_path: str | None = None, new_run: bool = False
             ep_ret, ep_len = 0.0, 0
             episode_idx += 1
 
-        # Evaluación periódica
         if step > 0 and step % eval_every == 0:
             ckpt_file = os.path.join(ckpt_path, f"step_{step}.pt")
             agent.save(ckpt_file)
