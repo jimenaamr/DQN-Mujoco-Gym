@@ -220,13 +220,12 @@ class RDQNAgent:
     def update(self) -> dict[str, float]:
         beta = min(1.0, self.cfg.prio_beta_start + self.global_step * (1.0 - self.cfg.prio_beta_start) / self.cfg.prio_beta_steps)
         batch = self.buffer.sample(self.cfg.batch_size, beta)
-        
-        obs = torch.as_tensor(batch["obs"], device=self.device, non_blocking=True)
-        next_obs = torch.as_tensor(batch["next_obs"], device=self.device, non_blocking=True)
-        actions = torch.as_tensor(batch["actions"], device=self.device, non_blocking=True)
-        rewards = torch.as_tensor(batch["rewards"], device=self.device, non_blocking=True)
-        dones = torch.as_tensor(batch["dones"], device=self.device, non_blocking=True)
-        weights = torch.as_tensor(batch["weights"], device=self.device, non_blocking=True)
+        obs = torch.as_tensor(batch["obs"]).to(self.device, non_blocking=True)
+        next_obs = torch.as_tensor(batch["next_obs"]).to(self.device, non_blocking=True)
+        actions = torch.as_tensor(batch["actions"]).to(self.device, non_blocking=True)
+        rewards = torch.as_tensor(batch["rewards"]).to(self.device, non_blocking=True)
+        dones = torch.as_tensor(batch["dones"]).to(self.device, non_blocking=True)
+        weights = torch.as_tensor(batch["weights"]).to(self.device, non_blocking=True)
 
         with torch.no_grad():
             next_action = self.q.get_q_values(next_obs).argmax(1)
