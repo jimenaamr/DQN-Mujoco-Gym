@@ -1,4 +1,5 @@
 from __future__ import annotations
+from random import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -247,11 +248,22 @@ class RDQNAgent:
         self.global_step, self.updates = 0, 0
 
     @torch.no_grad()
-    def act(self, obs: np.ndarray, eval_mode: bool = False) -> int:
+    def act(self, obs: np.ndarray, eval_mode: bool) -> int:
         self.q.eval() if eval_mode else self.q.train()
-        # Asegurar que la observación se convierta a tensor en el dispositivo correcto
-        x = torch.as_tensor(obs, device=self.device, dtype=torch.uint8).unsqueeze(0)
-        return int(self.q.get_q_values(x).argmax(1).item())
+        
+        # Lógica de Ablación: Si noisy_sigma0 es 0, usamos epsilon-greedy
+        if not eval_mode and self.cfg.noisy_sigma0 > 0:
+            self.q.reset_noise()
+        
+        # Epsilon-greedy (solo si noisy_sigma0 es 0 y no estamos en eval)
+        epsilon = 0.05 # Valor fijo para la ablación
+        if not eval_mode and self.cfg.noisy_sigma0 == 0 and random.random() < epsilon:
+            return random.randrange(self.n_actions)
+
+        obs_t = torch.as_tensor(obs, device=self.device, dtype=torch.uint8).unsqueeze(0)
+        prob = F.softmax(self.q(obs_t), dim=-1)
+        q_values = (prob * self.support).sum(2)
+        return int(q_values.argmax(1).item())
 
     def store(self, obs, action, reward, next_obs, done):
         self.buffer.add(obs, action, reward, next_obs, done)
@@ -263,78 +275,77 @@ class RDQNAgent:
         )
 
     def update(self) -> dict[str, float]:
-        beta = min(
-            1.0,
-            self.cfg.prio_beta_start
-            + self.global_step
-            * (1.0 - self.cfg.prio_beta_start)
-            / self.cfg.prio_beta_steps,
-        )
-        batch = self.buffer.sample(self.cfg.batch_size, beta)
-        obs = torch.as_tensor(batch["obs"]).to(self.device, non_blocking=True)
-        next_obs = torch.as_tensor(batch["next_obs"]).to(self.device, non_blocking=True)
-        actions = torch.as_tensor(batch["actions"]).to(self.device, non_blocking=True)
-        rewards = torch.as_tensor(batch["rewards"]).to(self.device, non_blocking=True)
-        dones = torch.as_tensor(batch["dones"]).to(self.device, non_blocking=True)
-        weights = torch.as_tensor(batch["weights"]).to(self.device, non_blocking=True)
+        # Si el paso actual no toca entrenar, salimos
+        if (self.global_step % self.cfg.train_freq) != 0: 
+            return {}
+
+        # --- LÓGICA DE ABLACIÓN PARA PER ---
+        # Si prio_alpha es 0, no hay priorización, beta no importa (muestreo uniforme)
+        if self.cfg.prio_alpha > 0:
+            beta = min(1.0, self.cfg.prio_beta_start + self.global_step * (self.cfg.prio_beta_end - self.cfg.prio_beta_start) / self.cfg.prio_beta_steps)
+        else:
+            beta = 0.0 # Valor neutral para muestreo uniforme
+        # -----------------------------------
+
+        batch_np, idx, w_np = self.replay.sample(self.cfg.batch_size, beta, self.rng)
+
+        # Carga de tensores (con las correcciones de tipos anteriores)
+        obs = torch.as_tensor(batch_np["obs"], device=self.device)
+        next_obs = torch.as_tensor(batch_np["next_obs"], device=self.device)
+        action = torch.as_tensor(batch_np["action"], device=self.device)
+        reward = torch.as_tensor(batch_np["reward"], device=self.device)
+        done = torch.as_tensor(batch_np["done"], device=self.device, dtype=torch.float32)
+        w = torch.as_tensor(w_np, device=self.device)
+
+        self.q.train()
+        # Solo reseteamos ruido si Noisy Nets están activas (noisy_sigma0 > 0)
+        if self.cfg.noisy_sigma0 > 0:
+            self.q.reset_noise()
+
+        # Logits actuales
+        logits = self.q(obs)[range(self.cfg.batch_size), action]
+        log_prob = F.log_softmax(logits, dim=-1)
 
         with torch.no_grad():
-            next_action = self.q.get_q_values(next_obs).argmax(1)
-            next_dist = self.q_target(next_obs)[range(self.cfg.batch_size), next_action]
+            # Double DQN: Selección con Q, evaluación con Q_target
+            next_action = (F.softmax(self.q(next_obs), dim=-1) * self.support).sum(2).argmax(1)
+            next_prob = F.softmax(self.q_target(next_obs)[range(self.cfg.batch_size), next_action], dim=-1)
 
-            # Proyección categórica vectorizada (Optimización x10) [cite: 68, 76]
-            dones_float = dones.unsqueeze(1).to(torch.float32)
-            target_z = (
-                rewards.unsqueeze(1)
-                + (1.0 - dones_float)
-                * (self.cfg.gamma**self.cfg.n_step)
-                * self.q.support
-            )
-            target_z = target_z.clamp(self.cfg.v_min, self.cfg.v_max)
-
-            delta_z = (self.cfg.v_max - self.cfg.v_min) / (self.cfg.n_atoms - 1)
-            b = (target_z - self.cfg.v_min) / delta_z
+            # Proyección C51
+            tz = reward.unsqueeze(1) + (1.0 - done.unsqueeze(1)) * self.cfg.gamma * self.support
+            tz = tz.clamp(self.cfg.v_min, self.cfg.v_max)
+            
+            b = (tz - self.cfg.v_min) / self.delta_z
             l, u = b.floor().long(), b.ceil().long()
             l[(u > 0) * (l == u)] -= 1
             u[(l < (self.cfg.n_atoms - 1)) * (l == u)] += 1
 
-            m = torch.zeros(self.cfg.batch_size, self.cfg.n_atoms, device=self.device)
-            offset = (
-                torch.linspace(
-                    0,
-                    (self.cfg.batch_size - 1) * self.cfg.n_atoms,
-                    self.cfg.batch_size,
-                    device=self.device,
-                )
-                .long()
-                .unsqueeze(1)
-            )
-            m.view(-1).index_add_(
-                0, (l + offset).view(-1), (next_dist * (u.float() - b)).view(-1).float()
-            )
-            m.view(-1).index_add_(
-                0, (u + offset).view(-1), (next_dist * (b - l.float())).view(-1).float()
-            )
+            target_dist = torch.zeros(self.cfg.batch_size, self.n_atoms, device=self.device)
+            offset = torch.linspace(0, (self.cfg.batch_size - 1) * self.n_atoms, self.cfg.batch_size).to(self.device).long().unsqueeze(1)
+            
+            # Suma de probabilidades proyectadas (float() evita error de Double)
+            target_dist.view(-1).index_add_(0, (l + offset).view(-1), (next_prob * (u.float() - b)).view(-1).float())
+            target_dist.view(-1).index_add_(0, (u + offset).view(-1), (next_prob * (b - l.float())).view(-1).float())
 
-        dist = self.q(obs)[range(self.cfg.batch_size), actions]
-        dist = dist.clamp(min=1e-9)  # Seguridad adicional contra ceros
-        log_p = torch.log(dist)
-        loss = (-(m * log_p).sum(dim=1) * weights).mean()
+        # Pérdida de Cross-Entropy (pesada por w del PER)
+        loss = (-(target_dist * log_prob).sum(1) * w).mean()
 
         self.opt.zero_grad(set_to_none=True)
         loss.backward()
-        if self.cfg.grad_clip_norm > 0:
+        if self.cfg.grad_clip_norm > 0: 
             nn.utils.clip_grad_norm_(self.q.parameters(), self.cfg.grad_clip_norm)
         self.opt.step()
 
+        # Actualizar prioridades solo si PER está activo
+        if self.cfg.prio_alpha > 0:
+            td_errors = (-(target_dist * log_prob).sum(1)).detach().cpu().numpy()
+            self.replay.update_priorities(idx, td_errors)
+
         self.updates += 1
-        if self.updates % self.cfg.target_update_freq == 0:
+        if (self.updates % self.cfg.target_update_freq) == 0: 
             self.q_target.load_state_dict(self.q.state_dict())
-        self.buffer.update_priorities(
-            batch["indices"], (-(m * log_p).sum(dim=1)).detach().cpu().numpy()
-        )
-        self._reset_noise()
-        return {"loss": loss.item()}
+
+        return {"loss": loss.item(), "updates": self.updates}
 
     def _reset_noise(self):
         for m in self.q.modules():

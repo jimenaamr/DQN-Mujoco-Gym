@@ -13,7 +13,6 @@ env:
 
   grayscale: false
 
-  
   action_prototypes:
 
   # 0) noop

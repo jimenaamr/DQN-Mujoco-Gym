@@ -8,7 +8,6 @@ import numpy as np
 import yaml
 import torch
 
-# CAMBIO CRÍTICO: Importar de rdqn_emma, NO de rdqn
 from src.rdqn_emma.env import EnvSpec, make_eval_env
 from src.rdqn_emma.rdqn import RDQNAgent, RDQNConfig
 
