@@ -240,6 +240,8 @@ class RDQNAgent:
     def __init__(self, obs_shape, n_actions, cfg: RDQNConfig):
         self.cfg = cfg
         self.device = torch.device(cfg.device)
+        self.support = torch.linspace(cfg.v_min, cfg.v_max, cfg.n_atoms).to(self.device)
+        self.delta_z = (cfg.v_max - cfg.v_min) / (cfg.n_atoms - 1)
         self.q = _RainbowNet(
             obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0
         ).to(self.device)
@@ -257,17 +259,17 @@ class RDQNAgent:
     def act(self, obs: np.ndarray, eval_mode: bool) -> int:
         self.q.eval() if eval_mode else self.q.train()
         
-        # Lógica de Ablación: Si noisy_sigma0 es 0, usamos epsilon-greedy
         if not eval_mode and self.cfg.noisy_sigma0 > 0:
             self.q.reset_noise()
         
-        # Epsilon-greedy (solo si noisy_sigma0 es 0 y no estamos en eval)
-        epsilon = 0.05 # Valor fijo para la ablación
-        if not eval_mode and self.cfg.noisy_sigma0 == 0 and random.random() < epsilon:
-            return random.randrange(self.n_actions)
+        # Si NO hay Noisy Nets, usamos epsilon-greedy manual
+        if not eval_mode and self.cfg.noisy_sigma0 == 0:
+            if random() < 0.05: # Usamos random() directamente por tu import
+                return np.random.randint(self.n_actions) 
 
         obs_t = torch.as_tensor(obs, device=self.device, dtype=torch.uint8).unsqueeze(0)
         prob = F.softmax(self.q(obs_t), dim=-1)
+        # Aquí es donde usas self.support
         q_values = (prob * self.support).sum(2)
         return int(q_values.argmax(1).item())
 
