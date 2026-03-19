@@ -188,7 +188,7 @@ class NoisyLinear(nn.Module):
 
 
 class _RainbowNet(nn.Module):
-    """Dueling Distributional Network[cite: 66, 68, 70]."""
+    """Dueling Distributional Network."""
 
     def __init__(self, obs_shape, n_actions, n_atoms, v_min, v_max, noisy_std):
         super().__init__()
@@ -214,6 +214,12 @@ class _RainbowNet(nn.Module):
             nn.ReLU(),
             NoisyLinear(256, n_actions * n_atoms, noisy_std),
         )
+
+    def reset_noise(self):
+        """Resetea el ruido en todas las capas NoisyLinear de la red."""
+        for m in self.modules():
+            if isinstance(m, NoisyLinear):
+                m.reset_noise()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         if x.dtype == torch.uint8:
