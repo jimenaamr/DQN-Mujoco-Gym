@@ -101,7 +101,7 @@ class PrioritizedReplayBuffer:
             max_p = 1.0
         self.tree.add(max_p, (obs, action, reward, next_obs, done))
 
-    def sample(self, batch_size: int, beta: float):
+    def sample(self, batch_size: int, beta: float, rng=None):
         batch = []
         idxs = []
         priorities = []
