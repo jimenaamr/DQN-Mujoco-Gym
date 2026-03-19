@@ -238,22 +238,27 @@ class RDQNAgent:
     """Agente Rainbow optimizado y autocontenido."""
 
     def __init__(self, obs_shape, n_actions, cfg: RDQNConfig):
-        self.cfg = cfg
-        self.device = torch.device(cfg.device)
-        self.support = torch.linspace(cfg.v_min, cfg.v_max, cfg.n_atoms).to(self.device)
-        self.delta_z = (cfg.v_max - cfg.v_min) / (cfg.n_atoms - 1)
-        self.q = _RainbowNet(
-            obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0
-        ).to(self.device)
-        self.q_target = _RainbowNet(
-            obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0
-        ).to(self.device)
-        self.q_target.load_state_dict(self.q.state_dict())
-        self.opt = torch.optim.Adam(self.q.parameters(), lr=cfg.lr, eps=1.5e-4)
-        self.buffer = PrioritizedReplayBuffer(
-            cfg.buffer_size, cfg.prio_alpha, cfg.prio_eps
-        )
-        self.global_step, self.updates = 0, 0
+            self.cfg = cfg
+            self.device = torch.device(cfg.device)
+            
+            # 1. Soporte para C51
+            self.support = torch.linspace(cfg.v_min, cfg.v_max, cfg.n_atoms).to(self.device)
+            self.delta_z = (cfg.v_max - cfg.v_min) / (cfg.n_atoms - 1)
+
+            # 2. Redes
+            self.q = _RainbowNet(obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0).to(self.device)
+            self.q_target = _RainbowNet(obs_shape, n_actions, cfg.n_atoms, cfg.v_min, cfg.v_max, cfg.noisy_sigma0).to(self.device)
+            self.q_target.load_state_dict(self.q.state_dict())
+            
+            # 3. Optimizador y Buffer (IMPORTANTE: nombre 'replay')
+            self.opt = torch.optim.Adam(self.q.parameters(), lr=cfg.lr, eps=1.5e-4)
+            self.replay = PrioritizedReplayBuffer(cfg.buffer_size, cfg.prio_alpha, cfg.prio_eps)
+            
+            # 4. Generador aleatorio para el muestreo
+            import random
+            self.rng = random.Random(0) # Seed fija o la que prefieras
+            
+            self.global_step, self.updates = 0, 0
 
     @torch.no_grad()
     def act(self, obs: np.ndarray, eval_mode: bool) -> int:
@@ -274,13 +279,12 @@ class RDQNAgent:
         return int(q_values.argmax(1).item())
 
     def store(self, obs, action, reward, next_obs, done):
-        self.buffer.add(obs, action, reward, next_obs, done)
+        self.replay.add(obs, action, reward, next_obs, done)
 
     def can_update(self) -> bool:
-        return (
-            self.global_step >= self.cfg.learning_starts
-            and (self.global_step % self.cfg.train_freq) == 0
-        )
+        # Usamos .tree.n_entries para saber cuántos datos hay realmente
+        return (self.global_step >= self.cfg.learning_starts and 
+                self.replay.tree.n_entries >= self.cfg.batch_size)
 
     def update(self) -> dict[str, float]:
         # Si el paso actual no toca entrenar, salimos
@@ -300,10 +304,10 @@ class RDQNAgent:
         # Carga de tensores (con las correcciones de tipos anteriores)
         obs = torch.as_tensor(batch_np["obs"], device=self.device)
         next_obs = torch.as_tensor(batch_np["next_obs"], device=self.device)
-        action = torch.as_tensor(batch_np["action"], device=self.device)
-        reward = torch.as_tensor(batch_np["reward"], device=self.device)
-        done = torch.as_tensor(batch_np["done"], device=self.device, dtype=torch.float32)
-        w = torch.as_tensor(w_np, device=self.device)
+        action = torch.as_tensor(batch_np["actions"], device=self.device)
+        reward = torch.as_tensor(batch_np["rewards"], device=self.device)
+        done = torch.as_tensor(batch_np["dones"], device=self.device, dtype=torch.float32)
+        w = torch.as_tensor(batch_np["weights"], device=self.device)
 
         self.q.train()
         # Solo reseteamos ruido si Noisy Nets están activas (noisy_sigma0 > 0)
