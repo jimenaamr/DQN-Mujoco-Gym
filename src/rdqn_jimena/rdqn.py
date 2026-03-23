@@ -274,9 +274,8 @@ class RDQNAgent:
             self.q.reset_noise()
         
         # Si NO hay Noisy Nets, usamos epsilon-greedy manual
-        if not eval_mode and self.cfg.noisy_sigma0 == 0:
-            if random() < 0.05:
-                return np.random.randint(self.n_actions)  # FIX: self.n_actions ahora existe
+        if not eval_mode and self.cfg.noisy_sigma0 == 0 and random() < 0.05:
+            return np.random.randint(self.n_actions)  # FIX: self.n_actions ahora existe
 
         obs_t = torch.as_tensor(obs, device=self.device, dtype=torch.uint8).unsqueeze(0)
         # FIX: self.q() ya devuelve softmax internamente, NO aplicar F.softmax de nuevo
@@ -304,22 +303,22 @@ class RDQNAgent:
 
         self.replay.add(obs_0, action_0, R, next_obs_n, done_n)
 
-        # --- LOGGING TEMPORAL: retornos n-step para calibrar v_min/v_max ---
-        if not hasattr(self, '_r_log'):
-            self._r_log = []
-        self._r_log.append(R)
-        if len(self._r_log) % 1000 == 0:
-            recent = self._r_log[-1000:]
-            print(
-                f"[n-step R | last 1000] "
-                f"min={np.min(recent):.3f}  "
-                f"max={np.max(recent):.3f}  "
-                f"mean={np.mean(recent):.3f}  "
-                f"p5={np.percentile(recent, 5):.3f}  "
-                f"p95={np.percentile(recent, 95):.3f}  "
-                f"(step={self.global_step})"
-            )
-        # --- FIN LOGGING TEMPORAL ---
+        # # --- LOGGING TEMPORAL: retornos n-step para calibrar v_min/v_max ---
+        # if not hasattr(self, '_r_log'):
+        #     self._r_log = []
+        # self._r_log.append(R)
+        # if len(self._r_log) % 1000 == 0:
+        #     recent = self._r_log[-1000:]
+        #     print(
+        #         f"[n-step R | last 1000] "
+        #         f"min={np.min(recent):.3f}  "
+        #         f"max={np.max(recent):.3f}  "
+        #         f"mean={np.mean(recent):.3f}  "
+        #         f"p5={np.percentile(recent, 5):.3f}  "
+        #         f"p95={np.percentile(recent, 95):.3f}  "
+        #         f"(step={self.global_step})"
+        #     )
+        # # --- FIN LOGGING TEMPORAL ---
 
         # Si el episodio termina, vaciamos el buffer completamente
         # (guardamos también las transiciones finales con menos de n pasos)
@@ -386,6 +385,9 @@ class RDQNAgent:
             l, u = b.floor().long(), b.ceil().long()
             l[(u > 0) * (l == u)] -= 1
             u[(l < (self.cfg.n_atoms - 1)) * (l == u)] += 1
+
+            l = l.clamp(0, self.cfg.n_atoms - 1)
+            u = u.clamp(0, self.cfg.n_atoms - 1)
 
             target_dist = torch.zeros(self.cfg.batch_size, self.cfg.n_atoms, device=self.device)
             offset = torch.linspace(0, (self.cfg.batch_size - 1) * self.cfg.n_atoms, self.cfg.batch_size).to(self.device).long().unsqueeze(1)
