@@ -303,22 +303,22 @@ class RDQNAgent:
 
         self.replay.add(obs_0, action_0, R, next_obs_n, done_n)
 
-        # # --- LOGGING TEMPORAL: retornos n-step para calibrar v_min/v_max ---
-        # if not hasattr(self, '_r_log'):
-        #     self._r_log = []
-        # self._r_log.append(R)
-        # if len(self._r_log) % 1000 == 0:
-        #     recent = self._r_log[-1000:]
-        #     print(
-        #         f"[n-step R | last 1000] "
-        #         f"min={np.min(recent):.3f}  "
-        #         f"max={np.max(recent):.3f}  "
-        #         f"mean={np.mean(recent):.3f}  "
-        #         f"p5={np.percentile(recent, 5):.3f}  "
-        #         f"p95={np.percentile(recent, 95):.3f}  "
-        #         f"(step={self.global_step})"
-        #     )
-        # # --- FIN LOGGING TEMPORAL ---
+        # --- LOGGING TEMPORAL: retornos n-step para calibrar v_min/v_max ---
+        if not hasattr(self, '_r_log'):
+            self._r_log = []
+        self._r_log.append(R)
+        if len(self._r_log) % 1000 == 0:
+            recent = self._r_log[-1000:]
+            print(
+                f"[n-step R | last 1000] "
+                f"min={np.min(recent):.3f}  "
+                f"max={np.max(recent):.3f}  "
+                f"mean={np.mean(recent):.3f}  "
+                f"p5={np.percentile(recent, 5):.3f}  "
+                f"p95={np.percentile(recent, 95):.3f}  "
+                f"(step={self.global_step})"
+            )
+        # --- FIN LOGGING TEMPORAL ---
 
         # Si el episodio termina, vaciamos el buffer completamente
         # (guardamos también las transiciones finales con menos de n pasos)
