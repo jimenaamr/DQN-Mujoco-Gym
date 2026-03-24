@@ -1,4 +1,3 @@
-# src/rdqn/eval_worker.py
 # src/rdqn_jimena/eval_worker.py
 
 from __future__ import annotations
