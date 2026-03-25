@@ -85,8 +85,8 @@ train:
 # Rainbow-specific parameters
 rainbow:
   # Distributional (C51)
-  v_min: -5.0
-  v_max: 30.0
+  v_min: -20.0
+  v_max: 220.0
   n_atoms: 51
 
   # N-step returns
