@@ -1,4 +1,4 @@
-# src/dqn/monitoring.py
+# src/rdqn/monitoring.py
 
 from __future__ import annotations
 

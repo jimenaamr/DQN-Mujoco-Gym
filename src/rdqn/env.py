@@ -1,3 +1,5 @@
+# src/rdqn/env.py
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -9,7 +11,7 @@ import numpy as np
 from gymnasium import spaces
 from gymnasium.wrappers import RecordVideo, TimeLimit
 
-from src.rdqn.helper import HeadStabilizerWrapper, StabilizerConfig
+from rdqn.helper import HeadStabilizerWrapper, StabilizerConfig
 from src.rdqn.reward import walker2d_default_reward
 
 # CROPS = (top, bottom, left, right)  # fractions of each border to crop (e.g., 0.10 = 10%)
@@ -732,6 +734,11 @@ def make_eval_env(spec: EnvSpec, seed: int, video_dir: str) -> gym.Env:
         name_prefix="eval",
         disable_logger=True,
     )
+
+    # FIX: action_repeat debe aplicarse igual que en make_env para que
+    # train y eval sean comparables
+    if spec.action_repeat > 1:
+        env = ActionRepeat(env=env, repeat=spec.action_repeat)
 
     env = PixelObservationWrapper(
         env=env,

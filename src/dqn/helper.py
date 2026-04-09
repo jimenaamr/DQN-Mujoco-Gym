@@ -1,4 +1,4 @@
-# src/DQN_walker2d/helper.py
+# src/dqn/helper.py
 
 from __future__ import annotations
 

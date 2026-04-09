@@ -1,4 +1,4 @@
-# src/rdqn/eval_worker.py
+# src/rdqn/eval.py
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from typing import Any
 
 import numpy as np
 import yaml
-from src.rdqn.helper import resolve_device
+from rdqn.helper import resolve_device
 
 from src.rdqn.env import EnvSpec, make_eval_env
 from src.rdqn.rdqn import RDQNAgent, RDQNConfig
